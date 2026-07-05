@@ -117,8 +117,13 @@ export async function reorderAssessments(orderedIds) {
 }
 
 export async function getColumnsByAssessment(assessmentId) {
+  // Dated columns sort chronologically (earliest → latest); columns without a
+  // date yet (newly added) always come LAST, so new columns append at the end
+  // and snap into chronological position once a date is assigned.
   return db.all(
-    'SELECT * FROM assessment_columns WHERE assessment_id = ? AND deleted_at IS NULL ORDER BY date, sort_order',
+    `SELECT * FROM assessment_columns
+     WHERE assessment_id = ? AND deleted_at IS NULL
+     ORDER BY (date IS NULL), date, sort_order`,
     [assessmentId]
   );
 }

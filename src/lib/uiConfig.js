@@ -5,9 +5,9 @@
 // assessment date/score column in the gradebook grid.
 //
 // 👉 To make the gradebook columns wider or narrower, change this ONE number.
-//    (The previous effective width was ~80px; 48 is ~40% narrower.)
+//    (56 = compact width + enough room for MM/DD/YYYY with inner padding.)
 // =============================================================================
-export const ASSESSMENT_COL_WIDTH_PX = 48;
+export const ASSESSMENT_COL_WIDTH_PX = 56;
 
 // Width of the per-period "Grade" column.
 export const GRADE_COL_WIDTH_PX = 56;

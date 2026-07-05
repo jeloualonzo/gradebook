@@ -460,7 +460,7 @@ function AssessmentBlock({
   if (mode === 'header-dates') {
     if (assessment.columns.length === 0) {
       return (
-        <th className="relative border-r border-gray-200 px-0 py-0.5 text-center">
+        <th className="relative border-r border-gray-200 px-1 py-0.5 text-center">
           <span
             className="block text-[9px] text-gray-300 cursor-pointer hover:text-blue-600 py-0.5"
             title="Set date"
@@ -501,7 +501,7 @@ function AssessmentBlock({
     return (
       <>
         {assessment.columns.map(col => (
-          <th key={col.id} className="group relative border-r border-gray-200 px-0 py-0.5 text-center">
+          <th key={col.id} className="group relative border-r border-gray-200 px-1 py-0.5 text-center">
             <span
               className="block text-[9px] cursor-pointer hover:text-blue-600 py-0.5 truncate"
               onClick={() => setEditingDate(col.id)}
@@ -556,7 +556,7 @@ function AssessmentBlock({
   if (mode === 'header-max-scores') {
     if (assessment.columns.length === 0) {
       return (
-        <th className="border-r border-gray-200 px-0 py-0.5 text-center">
+        <th className="border-r border-gray-200 px-1 py-0.5 text-center">
           <span className="block text-[9px] text-gray-300 py-0.5">--</span>
         </th>
       );
@@ -565,7 +565,7 @@ function AssessmentBlock({
     return (
       <>
         {assessment.columns.map(col => (
-          <th key={col.id} className="border-r border-gray-200 px-0 py-0.5 text-center">
+          <th key={col.id} className="border-r border-gray-200 px-1 py-0.5 text-center">
             <input
               // Remount when the stored value changes (rollback / undo / redo)
               // so this uncontrolled input always shows the current value.

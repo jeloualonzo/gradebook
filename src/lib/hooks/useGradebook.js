@@ -69,6 +69,16 @@ export function useGradebook(subjectId) {
     }));
   }, []);
 
+  // Columns order: dated chronologically, undated (new) always last —
+  // mirrors the server ordering so optimistic date edits re-sort instantly.
+  const columnOrder = (a, b) => {
+    const an = a.date == null;
+    const bn = b.date == null;
+    if (an !== bn) return an ? 1 : -1;
+    if (!an && a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return (a.sort_order || 0) - (b.sort_order || 0);
+  };
+
   // Optimistically patch one assessment column (date / max score).
   const patchColumnLocal = useCallback((columnId, patch) => {
     setPeriods(prev => prev.map(p => {
@@ -77,7 +87,12 @@ export function useGradebook(subjectId) {
         ...p,
         assessments: p.assessments.map(a =>
           a.columns?.some(c => c.id === columnId)
-            ? { ...a, columns: a.columns.map(c => (c.id === columnId ? { ...c, ...patch } : c)) }
+            ? {
+                ...a,
+                columns: a.columns
+                  .map(c => (c.id === columnId ? { ...c, ...patch } : c))
+                  .sort(columnOrder),
+              }
             : a
         ),
       };
