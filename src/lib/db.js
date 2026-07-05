@@ -91,6 +91,16 @@ const api = {
     fs.writeFileSync(devicePath, JSON.stringify(device, null, 2));
     return device.device_label;
   },
+  /** Full installation config (device identity + sync settings + peer registry). */
+  getDeviceConfig() {
+    return { ...device };
+  },
+  /** Shallow-merge a patch into device.json (sync folder, peers, timestamps). */
+  patchDeviceConfig(patch) {
+    Object.assign(device, patch);
+    fs.writeFileSync(devicePath, JSON.stringify(device, null, 2));
+    return { ...device };
+  },
   /** Paths, for backups/diagnostics (used by later phases). */
   paths: {
     dataDir,

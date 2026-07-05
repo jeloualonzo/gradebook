@@ -14,6 +14,7 @@ export default function GroupsPage() {
   const [editTarget, setEditTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const [syncInfo, setSyncInfo] = useState(null);
 
   const showToast = useCallback(
     (message, type = 'success') => setToast({ message, type, key: Date.now() }),
@@ -37,6 +38,25 @@ export default function GroupsPage() {
   useEffect(() => {
     (async () => { await fetchGroups(); })();
   }, [fetchGroups]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/sync');
+        const d = await res.json();
+        if (res.ok) setSyncInfo(d);
+      } catch {
+        /* non-fatal */
+      }
+    })();
+  }, []);
+
+  const myId = syncInfo?.device_id;
+  const peerLabels = Object.fromEntries((syncInfo?.peers || []).map(p => [p.device_id, p.label]));
+  const ownerBadge = (g) =>
+    myId && g.owner_device_id && g.owner_device_id !== myId
+      ? (peerLabels[g.owner_device_id] || 'Other laptop')
+      : null;
 
   const filtered = groups.filter(g =>
     `${g.name} ${g.description || ''}`.toLowerCase().includes(search.toLowerCase())
@@ -156,6 +176,7 @@ export default function GroupsPage() {
                   <GroupCard
                     key={g.id}
                     group={g}
+                    ownerBadge={ownerBadge(g)}
                     onEdit={() => setEditTarget(g)}
                     onDelete={() => handleDelete(g.id)}
                     onDuplicate={() => handleDuplicate(g.id)}

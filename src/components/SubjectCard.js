@@ -9,7 +9,7 @@ const SEMESTER_LABELS = {
   'Summer': 'Summer',
 };
 
-export default function SubjectCard({ subject, onEdit, onDelete, onDuplicate }) {
+export default function SubjectCard({ subject, ownerBadge = null, onEdit, onDelete, onDuplicate }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const semester = SEMESTER_LABELS[subject.semester] || subject.semester;
@@ -59,6 +59,11 @@ export default function SubjectCard({ subject, onEdit, onDelete, onDuplicate }) 
             <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{subject.section}</span>
             <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">{subject.school_year}</span>
             <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{semester}</span>
+            {ownerBadge && (
+              <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full" title={`Created on ${ownerBadge}`}>
+                {ownerBadge}
+              </span>
+            )}
           </div>
         </Link>
       </div>

@@ -12,9 +12,10 @@
  *   <userData>/backups/<timestamp>/    — automatic launch backups (kept: 14)
  *   <userData>/logs/server.log         — server output for diagnostics
  */
-const { app, BrowserWindow, utilityProcess, dialog, shell } = require('electron');
+const { app, BrowserWindow, utilityProcess, dialog, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const { findFreePort, backupDatabase, waitForHttp } = require('./lib');
 
 const BACKUPS_TO_KEEP = 14;
@@ -106,9 +107,32 @@ async function start() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+
+  // Native folder picker for the sync settings dialog.
+  ipcMain.handle('gradebook:pick-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose the shared sync folder',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  // Fire-and-forget sync on launch (no-op until a sync folder is configured;
+  // failures only log — the gradebook never waits on sync).
+  const req = http.request(
+    { host: '127.0.0.1', port, path: '/api/sync/run', method: 'POST', headers: { 'Content-Type': 'application/json' } },
+    res => {
+      let body = '';
+      res.on('data', d => { body += d; });
+      res.on('end', () => log(`Launch sync (${res.statusCode}): ${body.slice(0, 300)}`));
+    }
+  );
+  req.on('error', err => log(`Launch sync skipped: ${err.message}`));
+  req.end('{}');
 
   // Internal navigation stays in-window; anything external opens in the browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 
 /** Card for one Student Group — mirrors SubjectCard's look and actions. */
-export default function GroupCard({ group, onEdit, onDelete, onDuplicate }) {
+export default function GroupCard({ group, ownerBadge = null, onEdit, onDelete, onDuplicate }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const count = Number(group.student_count) || 0;
 
@@ -56,6 +56,11 @@ export default function GroupCard({ group, onEdit, onDelete, onDuplicate }) {
             <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">
               {count} student{count !== 1 ? 's' : ''}
             </span>
+            {ownerBadge && (
+              <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full" title={`Created on ${ownerBadge}`}>
+                {ownerBadge}
+              </span>
+            )}
           </div>
         </Link>
       </div>

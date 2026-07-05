@@ -82,6 +82,26 @@ Notes:
   `npm run desktop:bundle` builds just the server bundle.
 - The web workflow (`npm run dev`) keeps working exactly as before.
 
-## Roadmap
+## Sync between two laptops (optional)
 
-- **Phase 3** — Optional two-laptop sync via a shared folder (offline-first, no accounts).
+Sync is an enhancement, never a dependency — the gradebook works identically
+with or without it, online or offline.
+
+**Setup (once, on both laptops):** open **Sync** in the header, point both
+laptops at the **same shared folder** (Google Drive / Dropbox / OneDrive /
+Syncthing / even a USB stick), save, and press **Sync now** on each.
+
+**How it works:** each laptop writes one snapshot file
+(`gradebook-<device-id>.json.gz`) into the folder and merges the other's.
+Merging is row-by-row: the newer edit wins, deletions carry as tombstones (so
+nothing deleted ever comes back by accident), and re-running a sync is always
+harmless. Sync also runs automatically when the desktop app starts. The two
+laptops never need to be online at the same time — the folder service carries
+the file whenever internet exists.
+
+Subjects and student groups show a badge when they were created on the other
+laptop, with a **Mine / All** filter on the subjects page. There are no
+accounts — each installation just has a name you chose on first run.
+
+> ⚠️ Use a **dedicated** shared folder. The app refuses to sync into its own
+> data folder — a live SQLite database must never sit inside Drive/Dropbox.
