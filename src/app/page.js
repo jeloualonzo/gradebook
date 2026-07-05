@@ -10,7 +10,6 @@ import Link from 'next/link';
 export default function HomePage() {
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -88,21 +87,6 @@ export default function HomePage() {
     }
   };
 
-  const handleAdd = async (form) => {
-    setSaving(true);
-    const res = await fetch('/api/subjects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    const { id } = await res.json();
-    setSaving(false);
-    setAddOpen(false);
-    showToast('Subject created');
-    await fetchSubjects();
-    window.location.href = `/subjects/new?id=${id}`;
-  };
-
   const handleEdit = async (form) => {
     setSaving(true);
     await fetch(`/api/subjects/${editTarget.id}`, {
@@ -157,15 +141,15 @@ export default function HomePage() {
             </svg>
             Student Groups
           </Link>
-          <button
-            onClick={() => setAddOpen(true)}
+          <Link
+            href="/subjects/new"
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             New Subject
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -181,12 +165,12 @@ export default function HomePage() {
             </div>
             <h2 className="text-base font-medium text-gray-700 mb-1">No subjects yet</h2>
             <p className="text-sm text-gray-400 mb-6">Create your first subject to start managing grades.</p>
-            <button
-              onClick={() => setAddOpen(true)}
-              className="px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            <Link
+              href="/subjects/new"
+              className="inline-block px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
             >
               Create Subject
-            </button>
+            </Link>
           </div>
         ) : (
           <>
@@ -273,14 +257,6 @@ export default function HomePage() {
             </button>
           </div>
         </form>
-      </Modal>
-
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="New Subject">
-        <SubjectForm
-          onSubmit={handleAdd}
-          onCancel={() => setAddOpen(false)}
-          loading={saving}
-        />
       </Modal>
 
       <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Subject">
