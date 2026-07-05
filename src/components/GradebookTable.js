@@ -142,13 +142,16 @@ export default function GradebookTable({
     });
   };
 
-  if (!students.length) {
-    return (
-      <div className="text-center py-16 text-gray-400 text-sm">
-        No students yet. Add students to begin entering grades.
-      </div>
-    );
-  }
+  // Total column count — must mirror the <colgroup> below exactly:
+  // #, name, then per period (one col per assessment column, min 1) + grade,
+  // then the final grade. Used by the no-students message row.
+  const totalCols =
+    2 +
+    periods.reduce(
+      (s, p) => s + p.assessments.reduce((x, a) => x + Math.max(a.columns.length, 1), 0) + 1,
+      0
+    ) +
+    1;
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -329,6 +332,15 @@ export default function GradebookTable({
         </thead>
 
         <tbody>
+          {/* The grid always renders (so assessments, columns, and dates can be
+              set up before any students exist) — the empty state is a row. */}
+          {students.length === 0 && (
+            <tr>
+              <td colSpan={totalCols} className="bg-white text-center py-10 text-gray-400 text-sm">
+                No students yet. Add students to begin entering grades.
+              </td>
+            </tr>
+          )}
           {students.map((student, idx) => {
             const periodGrades = {};
             for (const period of periods) {
