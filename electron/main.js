@@ -20,6 +20,10 @@ const { findFreePort, backupDatabase, waitForHttp } = require('./lib');
 
 const BACKUPS_TO_KEEP = 14;
 
+// Store data under %APPDATA%/Gradebook (matches the product name and docs) —
+// by default Electron would use the package.json name ("grading-system").
+app.setPath('userData', path.join(app.getPath('appData'), 'Gradebook'));
+
 let serverProc = null;
 let mainWindow = null;
 let logStream = null;

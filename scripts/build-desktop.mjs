@@ -99,20 +99,55 @@ const fetchPrebuild = (platform) => {
     '--platform', platform,
     '--arch', 'x64',
   ], { cwd: bundledSqlite });
+  syncHashedCopies();
 };
+
+// Turbopack ALSO keeps content-hashed copies of external packages under
+// .next/node_modules/<pkg>-<hash>/ — and the compiled server loads THOSE.
+// Every copy must carry the Electron-ABI binary, or the packaged app dies
+// with ERR_DLOPEN_FAILED (NODE_MODULE_VERSION mismatch).
+function syncHashedCopies() {
+  const srcBin = path.join(bundledSqlite, 'build', 'Release', 'better_sqlite3.node');
+  const hashedRoot = path.join(standalone, '.next', 'node_modules');
+  const patched = [];
+  if (fs.existsSync(srcBin) && fs.existsSync(hashedRoot)) {
+    for (const name of fs.readdirSync(hashedRoot)) {
+      if (name !== 'better-sqlite3' && !name.startsWith('better-sqlite3-')) continue;
+      const destDir = path.join(hashedRoot, name, 'build', 'Release');
+      fs.mkdirSync(destDir, { recursive: true });
+      fs.copyFileSync(srcBin, path.join(destDir, 'better_sqlite3.node'));
+      patched.push(name);
+    }
+  }
+  if (patched.length) console.log(`  patched hashed copies: ${patched.join(', ')}`);
+  return patched;
+}
 
 // Host pass + real boot verification under Electron's Node runtime.
 fetchPrebuild(process.platform);
 const electronBin = ensureElectronBinary();
-console.log('\n→ verifying the bundled binary loads under Electron');
+console.log('\n→ verifying the bundled binaries load under Electron');
+// Verify EVERY copy the server could load — especially the Turbopack-hashed
+// one, which is the copy the compiled server actually requires.
+const hashedRoot = path.join(standalone, '.next', 'node_modules');
+const verifyTargets = [
+  bundledSqlite,
+  ...(fs.existsSync(hashedRoot)
+    ? fs.readdirSync(hashedRoot)
+        .filter(n => n === 'better-sqlite3' || n.startsWith('better-sqlite3-'))
+        .map(n => path.join(hashedRoot, n))
+    : []),
+];
 // A script FILE (not -e) — robust across Windows quoting/newline handling.
 const verifyPath = path.join(standalone, '.verify-sqlite.cjs');
 fs.writeFileSync(verifyPath, `
-  const Database = require(${JSON.stringify(bundledSqlite)});
-  const db = new Database(':memory:');
-  db.exec('CREATE TABLE t(id TEXT)');
-  db.prepare('INSERT INTO t VALUES (?)').run('ok');
-  console.log('better-sqlite3 under Electron ABI: OK,', db.prepare('SELECT COUNT(*) c FROM t').get().c, 'row');
+  for (const target of ${JSON.stringify(verifyTargets)}) {
+    const Database = require(target);
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE t(id TEXT)');
+    db.prepare('INSERT INTO t VALUES (?)').run('ok');
+    console.log('OK under Electron ABI:', target);
+  }
 `);
 run(electronBin, [verifyPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
 fs.rmSync(verifyPath);
