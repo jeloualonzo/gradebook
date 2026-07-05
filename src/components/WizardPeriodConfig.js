@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { toCents, centsToNumber } from '@/lib/gradeCalculator';
 
 const DEFAULT_ASSESSMENTS = [
   { name: 'Attendance', is_exam: false, enabled: true },
@@ -34,10 +35,24 @@ export default function WizardPeriodConfig({ periodType, config, onChange }) {
     onChange({ ...config, assessments: updated });
   };
 
+  // While typing, keep the RAW string exactly as entered — never transform
+  // user input mid-edit (transforming on change ate decimal points and could
+  // silently turn "10.5" into "105").
   const updateWeight = (i, value) => {
-    const numValue = value === '' ? 0 : Math.round(parseFloat(value) * 100) / 100;
     const updated = config.assessments.map((a, idx) =>
-      idx === i ? { ...a, weight_percent: numValue } : a
+      idx === i ? { ...a, weight_percent: value } : a
+    );
+    onChange({ ...config, assessments: updated });
+  };
+
+  // On blur, normalize ONCE via integer cents: "40" stays 40, "10.50" becomes
+  // 10.5, "" becomes 0. Values that are already clean are preserved exactly.
+  const normalizeWeight = (i) => {
+    const a = config.assessments[i];
+    const clean = centsToNumber(toCents(a.weight_percent));
+    if (a.weight_percent === clean) return; // already exact — do not touch
+    const updated = config.assessments.map((x, idx) =>
+      idx === i ? { ...x, weight_percent: clean } : x
     );
     onChange({ ...config, assessments: updated });
   };
@@ -63,9 +78,10 @@ export default function WizardPeriodConfig({ periodType, config, onChange }) {
     setNewName('');
   };
 
+  // Totals in integer cents — floating-point drift is impossible.
   const enabledAssessments = config.assessments.filter(a => a.enabled);
-  const totalWeight = enabledAssessments.reduce((s, a) => s + (parseFloat(a.weight_percent) || 0), 0);
-  const weightOk = Math.abs(totalWeight - 100) <= 0.01;
+  const totalCents = enabledAssessments.reduce((s, a) => s + toCents(a.weight_percent), 0);
+  const weightOk = totalCents === 10000;
 
   const isCustom = (a) => !DEFAULT_ASSESSMENTS.some(d => d.name === a.name && d.is_exam === a.is_exam);
 
@@ -112,6 +128,7 @@ export default function WizardPeriodConfig({ periodType, config, onChange }) {
                   className="w-full text-sm px-2 py-1 pr-5 border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
                   value={a.weight_percent}
                   onChange={(e) => updateWeight(i, e.target.value)}
+                  onBlur={() => normalizeWeight(i)}
                   placeholder="0"
                 />
                 <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
@@ -150,7 +167,7 @@ export default function WizardPeriodConfig({ periodType, config, onChange }) {
       </div>
 
       <div className={`mt-3 text-xs font-medium ${weightOk ? 'text-green-700' : 'text-amber-600'}`}>
-        Enabled weights total: {totalWeight.toFixed(1)}% {!weightOk && '(must equal 100%)'}
+        Enabled weights total: {centsToNumber(totalCents)}% {!weightOk && '(must equal 100%)'}
       </div>
     </div>
   );

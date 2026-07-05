@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import ConfirmDialog from './ConfirmDialog';
-import { formatNumber } from '@/lib/gradeCalculator';
+import { formatNumber, toCents, centsToNumber } from '@/lib/gradeCalculator';
 import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -128,11 +128,16 @@ export default function AssessmentBlock({
 
   const saveWeight = async () => {
     setEditingWeight(false);
-    const weightNum = parseFloat(weight);
-    const currentWeight = parseFloat(assessment.weight_percent);
-    if (Math.abs(weightNum - currentWeight) < 0.001) return;
-    const oldWeight = currentWeight;
-    const newWeight = Math.round(weightNum * 100) / 100;
+    // Integer-cents comparison and normalization — the entered value is
+    // preserved exactly (no floating-point drift like 39.99).
+    const newCents = toCents(weight);
+    const oldCents = toCents(assessment.weight_percent);
+    if (newCents === oldCents) {
+      setWeight(assessment.weight_percent);
+      return;
+    }
+    const oldWeight = centsToNumber(oldCents);
+    const newWeight = centsToNumber(newCents);
     await putAssessment({ weight_percent: newWeight });
     onRefresh();
     history?.push({

@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import WizardPeriodConfig, { getDefaultPeriodConfig } from '@/components/WizardPeriodConfig';
+import { toCents, centsToNumber } from '@/lib/gradeCalculator';
 
 const SCHOOL_YEARS = (() => {
   const years = [];
@@ -62,9 +63,10 @@ function NewSubjectContent() {
   }, []);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const totalPW = Number(form.prelim_weight) + Number(form.midterm_weight) + Number(form.final_weight);
-
-  const periodWeightOk = Math.abs(totalPW - 100) <= 0.01;
+  // Integer-cents math — no floating-point drift.
+  const totalPWCents = toCents(form.prelim_weight) + toCents(form.midterm_weight) + toCents(form.final_weight);
+  const totalPW = centsToNumber(totalPWCents);
+  const periodWeightOk = totalPWCents === 10000;
 
   const handleStep1 = async (e) => {
     e.preventDefault();
@@ -91,8 +93,8 @@ function NewSubjectContent() {
 
   const periodsValid = periods.every(p => {
     const enabled = p.assessments.filter(a => a.enabled);
-    const total = enabled.reduce((s, a) => s + Number(a.weight_percent || 0), 0);
-    return Math.abs(total - 100) <= 0.01 || enabled.length === 0;
+    const totalCents = enabled.reduce((s, a) => s + toCents(a.weight_percent), 0);
+    return totalCents === 10000 || enabled.length === 0;
   });
 
   const handleFinish = async () => {
@@ -101,7 +103,8 @@ function NewSubjectContent() {
       type: p.type,
       assessments: p.assessments
         .filter(a => a.enabled)
-        .map(a => ({ name: a.name, is_exam: a.is_exam, weight_percent: a.weight_percent })),
+        // Send clean cents-normalized numbers (exactly what the user entered).
+        .map(a => ({ name: a.name, is_exam: a.is_exam, weight_percent: centsToNumber(toCents(a.weight_percent)) })),
     }));
 
     await fetch(`/api/subjects/${createdId}/init`, {

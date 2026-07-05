@@ -148,3 +148,21 @@ export function formatNumber(value) {
   if (Number.isInteger(num)) return String(num);
   return String(parseFloat(num.toFixed(2)));
 }
+
+/**
+ * Convert a percentage value (string or number) to integer cents
+ * (hundredths). All weight totals and comparisons use integer cents so
+ * floating-point drift can never corrupt user-entered values:
+ * e.g. 33.33 + 33.33 + 33.34 sums to exactly 10000 cents (100%).
+ */
+export function toCents(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  const num = parseFloat(value);
+  if (!isFinite(num)) return 0;
+  return Math.round(num * 100);
+}
+
+/** Integer cents → clean display/storage number (40, 10.5, 33.33 — no drift). */
+export function centsToNumber(cents) {
+  return cents / 100;
+}

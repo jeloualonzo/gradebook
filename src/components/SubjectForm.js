@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { toCents } from '@/lib/gradeCalculator';
 
 const SCHOOL_YEARS = (() => {
   const years = [];
@@ -21,9 +22,10 @@ export default function SubjectForm({ initial = {}, onSubmit, onCancel, loading 
     final_weight: initial.final_weight ?? 40,
   });
 
-  const totalWeight = Number(form.prelim_weight) + Number(form.midterm_weight) + Number(form.final_weight);
+  // Integer-cents math — no floating-point drift.
+  const totalWeightCents = toCents(form.prelim_weight) + toCents(form.midterm_weight) + toCents(form.final_weight);
   // Derived directly from form state — no effect/state needed.
-  const weightError = Math.abs(totalWeight - 100) > 0.01 ? 'Period weights must sum to 100%.' : '';
+  const weightError = totalWeightCents !== 10000 ? 'Period weights must sum to 100%.' : '';
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -74,8 +76,8 @@ export default function SubjectForm({ initial = {}, onSubmit, onCancel, loading 
       <div className="border-t border-gray-100 pt-4">
         <p className="text-xs font-medium text-gray-700 mb-3">
           Grading Period Weights
-          <span className={`ml-2 font-semibold ${Math.abs(totalWeight - 100) > 0.01 ? 'text-red-500' : 'text-green-600'}`}>
-            ({totalWeight}%)
+          <span className={`ml-2 font-semibold ${weightError ? 'text-red-500' : 'text-green-600'}`}>
+            ({totalWeightCents / 100}%)
           </span>
         </p>
         <div className="grid grid-cols-3 gap-3">
