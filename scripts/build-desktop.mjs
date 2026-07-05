@@ -221,12 +221,11 @@ if (process.argv.includes('--no-pack')) {
 }
 
 // The Windows icon is stored as text (build/icon.b64) so git never carries a
-// binary; decode it to the .ico electron-builder expects.
+// binary; decode it to the .ico electron-builder expects. ALWAYS overwrite —
+// a stale or corrupt local icon.ico must never win over the one in git.
 const icoPath = path.join(root, 'build', 'icon.ico');
-if (!fs.existsSync(icoPath)) {
-  fs.writeFileSync(icoPath, Buffer.from(fs.readFileSync(path.join(root, 'build', 'icon.b64'), 'utf8'), 'base64'));
-  console.log('\n→ decoded build/icon.ico from build/icon.b64');
-}
+fs.writeFileSync(icoPath, Buffer.from(fs.readFileSync(path.join(root, 'build', 'icon.b64'), 'utf8'), 'base64'));
+console.log('\n→ refreshed build/icon.ico from build/icon.b64');
 const builderArgs = process.argv.includes('--dir')
   ? ['--dir']
   : ['--win', 'nsis', '--x64'];
