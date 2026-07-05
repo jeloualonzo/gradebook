@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 import { formatNumber } from '@/lib/gradeCalculator';
+import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
 
 export default function AssessmentBlock({ assessment, periodId, colors, mode, onRefresh }) {
   const [editingName, setEditingName] = useState(false);
@@ -69,6 +70,24 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
       body: JSON.stringify({ date: value || null }),
     });
     onRefresh();
+  };
+
+  // Commit a date edit. Saves ONLY when the value actually changed, so
+  // clicking a date and clicking away never mutates it.
+  const commitDate = (col, inputValue) => {
+    setEditingDate(null);
+    const prev = toDateInputValue(col.date);
+    const next = inputValue || '';
+    if (next === prev) return;
+    updateColumnDate(col.id, next || null);
+  };
+
+  // Commit a max-score edit only when the value actually changed.
+  const commitMaxScore = (col, inputValue) => {
+    const prev = parseFloat(col.max_score) || 0;
+    const next = parseFloat(inputValue) || 0;
+    if (Math.abs(next - prev) < 0.001) return;
+    updateMaxScore(col.id, inputValue);
   };
 
   const deleteColumn = async (colId) => {
@@ -192,24 +211,17 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
                   type="date"
                   autoFocus
                   className="w-full text-[10px] border border-blue-400 bg-white text-center focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
-                  defaultValue={col.date ? col.date.split('T')[0] : ''}
-                  onBlur={e => {
-                    updateColumnDate(col.id, e.target.value);
-                    setEditingDate(null);
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      updateColumnDate(col.id, e.target.value);
-                      setEditingDate(null);
-                    }
-                  }}
+                  defaultValue={toDateInputValue(col.date)}
+                  onFocus={e => { try { e.target.showPicker?.(); } catch {} }}
+                  onBlur={e => commitDate(col, e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && e.target.blur()}
                 />
               ) : (
                 <span
                   className="text-[10px] cursor-pointer hover:text-blue-600 py-0.5"
                   onClick={() => setEditingDate(col.id)}
                 >
-                  {col.date ? col.date.split('T')[0] : '--'}
+                  {formatDateMMDDYYYY(col.date)}
                 </span>
               )}
               <button
@@ -252,7 +264,7 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
               type="number"
               min="0"
               defaultValue={formatNumber(col.max_score)}
-              onBlur={e => updateMaxScore(col.id, e.target.value)}
+              onBlur={e => commitMaxScore(col, e.target.value)}
               onKeyDown={e => e.key === 'Enter' && e.target.blur()}
               className="w-full text-center text-[10px] border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
               title="Max score"

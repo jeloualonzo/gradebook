@@ -12,6 +12,11 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   multipleStatements: true,
+  // Return DATE/DATETIME columns as plain strings (e.g. '2026-06-16') instead
+  // of JS Date objects. JS Dates get serialized to UTC ISO strings in API
+  // responses, which shifts calendar dates by one day for timezones ahead of
+  // UTC. Keeping dates as strings end-to-end preserves the exact date picked.
+  dateStrings: true,
 });
 
 let initialized = false;

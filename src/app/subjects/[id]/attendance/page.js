@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Toast from '@/components/Toast';
+import { todayLocalISO } from '@/lib/dateUtils';
 
 const STATUS_OPTIONS = [
   { key: 'P', label: 'Present', color: 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200', activeColor: 'bg-green-600 text-white border-green-600' },
@@ -27,7 +28,7 @@ function AttendanceContent() {
   const [periods, setPeriods] = useState([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState(periodId || '');
   const [students, setStudents] = useState([]);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalISO());
   const [statuses, setStatuses] = useState({});
   const [config, setConfig] = useState({ present_score: 10, late_score: 8, absent_score: 0 });
   const [attendanceAssessmentId, setAttendanceAssessmentId] = useState(null);

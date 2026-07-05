@@ -1,6 +1,7 @@
 import pool from '@/lib/db';
 import ExcelJS from 'exceljs';
 import { computePeriodGrade, computeFinalSubjectGrade, formatGrade } from '@/lib/gradeCalculator';
+import { formatDateMMDDYYYY } from '@/lib/dateUtils';
 
 export async function GET(request, { params }) {
   try {
@@ -60,7 +61,7 @@ export async function GET(request, { params }) {
     for (const period of periods) {
       for (const a of period.assessments) {
         for (const col of a.columns) {
-          headers.push(`${period.type} - ${a.name}\n${col.date}`);
+          headers.push(`${period.type} - ${a.name}\n${col.date ? formatDateMMDDYYYY(col.date) : '--'}`);
         }
       }
       headers.push(`${period.type} Grade`);
