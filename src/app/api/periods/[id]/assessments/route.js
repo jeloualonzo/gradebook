@@ -1,4 +1,4 @@
-import { createAssessment, getAssessmentsByPeriod } from '@/lib/queries/assessments';
+import { createAssessment, getAssessmentsByPeriod, normalizeExamLast } from '@/lib/queries/assessments';
 
 export async function GET(request, { params }) {
   try {
@@ -17,6 +17,9 @@ export async function POST(request, { params }) {
     const existing = await getAssessmentsByPeriod(resolvedParams.id);
     const sortOrder = existing.length;
     const id = await createAssessment(resolvedParams.id, { ...body, sort_order: sortOrder });
+    // New assessments are inserted BEFORE the exam — the exam always keeps
+    // the highest sort_order in its period.
+    await normalizeExamLast(resolvedParams.id);
     return Response.json({ id }, { status: 201 });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });

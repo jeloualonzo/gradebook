@@ -362,7 +362,8 @@ function AssessmentBlock({
         id={assessment.id}
         periodId={periodId}
         colSpan={colSpan}
-        dragDisabled={editingName || editingWeight || confirmDelete}
+        // The Exam is permanently the last assessment — it cannot be dragged.
+        dragDisabled={!!assessment.is_exam || editingName || editingWeight || confirmDelete}
         className={`${colors.light} border-r border-b border-gray-200 text-center px-2 py-1.5`}
       >
         <div className="flex items-center justify-center gap-1">

@@ -1,5 +1,5 @@
 import pool from '@/lib/db';
-import { createPeriod, createAssessment, upsertAttendanceConfig } from '@/lib/queries/assessments';
+import { createPeriod, createAssessment, upsertAttendanceConfig, normalizeExamLast } from '@/lib/queries/assessments';
 
 export async function POST(request, { params }) {
   try {
@@ -25,6 +25,8 @@ export async function POST(request, { params }) {
           weight_percent: a.weight_percent || 0,
         });
       }
+      // The exam always ends up last, regardless of the submitted order.
+      await normalizeExamLast(periodId);
     }
 
     return Response.json({ ok: true });

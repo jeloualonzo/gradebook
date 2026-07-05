@@ -21,7 +21,7 @@ export async function GET(request, { params }) {
 
     for (const period of periods) {
       const [assessments] = await pool.query(
-        'SELECT * FROM assessments WHERE period_id = ? ORDER BY sort_order',
+        'SELECT * FROM assessments WHERE period_id = ? ORDER BY is_exam, sort_order',
         [period.id]
       );
       for (const a of assessments) {

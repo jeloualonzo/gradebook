@@ -95,11 +95,21 @@ export default function GradebookTable({
     if (!periodId || over.data.current?.periodId !== periodId) return;
     const period = periods.find(p => p.id === periodId);
     if (!period) return;
+    const byId = new Map(period.assessments.map(a => [a.id, a]));
+    // The exam itself is never draggable.
+    if (byId.get(active.id)?.is_exam) return;
     const oldIds = period.assessments.map(a => a.id);
     const oldIdx = oldIds.indexOf(active.id);
     const newIdx = oldIds.indexOf(over.id);
     if (oldIdx < 0 || newIdx < 0) return;
-    const newIds = arrayMove(oldIds, oldIdx, newIdx);
+    // The exam is permanently last: anything dropped below it is placed
+    // immediately above it (stable partition keeps relative order intact).
+    const moved = arrayMove(oldIds, oldIdx, newIdx);
+    const newIds = [
+      ...moved.filter(x => !byId.get(x)?.is_exam),
+      ...moved.filter(x => byId.get(x)?.is_exam),
+    ];
+    if (JSON.stringify(newIds) === JSON.stringify(oldIds)) return; // no-op after clamp
     onReorderLocal?.(periodId, newIds); // layout updates immediately on drop
     await persistOrder(newIds); // persist the new order in the database
     onRefreshPeriods();

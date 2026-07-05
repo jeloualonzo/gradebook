@@ -17,11 +17,38 @@ export async function createPeriod(subjectId, type) {
 }
 
 export async function getAssessmentsByPeriod(periodId) {
+  // Exams ALWAYS sort last within their grading period, even for legacy rows
+  // whose sort_order predates this rule.
   const [rows] = await pool.query(
-    'SELECT * FROM assessments WHERE period_id = ? ORDER BY sort_order',
+    'SELECT * FROM assessments WHERE period_id = ? ORDER BY is_exam, sort_order',
     [periodId]
   );
   return rows;
+}
+
+/**
+ * Re-number a period's assessments so non-exams keep their relative order
+ * and exams always receive the HIGHEST sort_order. Called after any create
+ * or reorder so the exam-last rule is persisted in the database.
+ */
+export async function normalizeExamLast(periodId) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      'SELECT id FROM assessments WHERE period_id = ? ORDER BY is_exam, sort_order',
+      [periodId]
+    );
+    for (let i = 0; i < rows.length; i++) {
+      await conn.query('UPDATE assessments SET sort_order = ? WHERE id = ?', [i, rows[i].id]);
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function createAssessment(periodId, { name, is_exam = 0, sort_order = 0, weight_percent = 0, skip_auto_column = false }) {
@@ -63,6 +90,20 @@ export async function reorderAssessments(orderedIds) {
     for (let i = 0; i < orderedIds.length; i++) {
       await conn.query('UPDATE assessments SET sort_order = ? WHERE id = ?', [i, orderedIds[i]]);
     }
+    // Enforce exam-last within the affected period, no matter what order the
+    // client sent (a drop past the exam lands immediately above it).
+    if (orderedIds.length > 0) {
+      const [[row]] = await conn.query('SELECT period_id FROM assessments WHERE id = ?', [orderedIds[0]]);
+      if (row) {
+        const [rows] = await conn.query(
+          'SELECT id FROM assessments WHERE period_id = ? ORDER BY is_exam, sort_order',
+          [row.period_id]
+        );
+        for (let i = 0; i < rows.length; i++) {
+          await conn.query('UPDATE assessments SET sort_order = ? WHERE id = ?', [i, rows[i].id]);
+        }
+      }
+    }
     await conn.commit();
   } catch (err) {
     await conn.rollback();
@@ -80,7 +121,16 @@ export async function getColumnsByAssessment(assessmentId) {
   return rows;
 }
 
-export async function createColumn(assessmentId, { date = null, max_score = 100 }) {
+export async function createColumn(assessmentId, { date = null, max_score = 100, dedupe_by_date = false }) {
+  // Used by Quick Attendance: never create a second column for the same
+  // date — reuse the existing one instead.
+  if (dedupe_by_date && date) {
+    const [existing] = await pool.query(
+      'SELECT id FROM assessment_columns WHERE assessment_id = ? AND date = ? LIMIT 1',
+      [assessmentId, date]
+    );
+    if (existing.length > 0) return existing[0].id;
+  }
   const [[{ cnt }]] = await pool.query(
     'SELECT COUNT(*) as cnt FROM assessment_columns WHERE assessment_id = ?',
     [assessmentId]

@@ -71,10 +71,13 @@ export default function WizardPeriodConfig({ periodType, config, onChange }) {
   const addCustom = () => {
     const name = newName.trim();
     if (!name) return;
-    onChange({
-      ...config,
-      assessments: [...config.assessments, { name, is_exam: false, enabled: true, weight_percent: 0 }],
-    });
+    // New assessments are always inserted BEFORE the exam — the exam stays last.
+    const item = { name, is_exam: false, enabled: true, weight_percent: 0 };
+    const examIdx = config.assessments.findIndex(a => a.is_exam);
+    const assessments = [...config.assessments];
+    if (examIdx === -1) assessments.push(item);
+    else assessments.splice(examIdx, 0, item);
+    onChange({ ...config, assessments });
     setNewName('');
   };
 
