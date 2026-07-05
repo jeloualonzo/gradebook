@@ -10,7 +10,7 @@ export async function GET(request, { params }) {
     if (!subject) return Response.json({ error: 'Not found' }, { status: 404 });
 
     const [students] = await pool.query(
-      'SELECT * FROM students WHERE subject_id = ? ORDER BY sort_order, last_name',
+      'SELECT * FROM students WHERE subject_id = ? ORDER BY last_name, first_name, middle_name',
       [subjectId]
     );
 

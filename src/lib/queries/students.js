@@ -1,8 +1,10 @@
 import pool from '@/lib/db';
 
 export async function getStudentsBySubject(subjectId) {
+  // Students are ALWAYS presented alphabetically (last, first, middle name)
+  // everywhere in the app so instructors can locate them instantly.
   const [rows] = await pool.query(
-    'SELECT * FROM students WHERE subject_id = ? ORDER BY sort_order, last_name, first_name',
+    'SELECT * FROM students WHERE subject_id = ? ORDER BY last_name, first_name, middle_name',
     [subjectId]
   );
   return rows;
