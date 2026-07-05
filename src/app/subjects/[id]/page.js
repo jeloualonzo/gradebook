@@ -14,7 +14,8 @@ export default function GradebookPage() {
   const {
     subject, periods, students, scores,
     loading, error,
-    updateScore, refreshPeriods, refreshStudents, refreshScores, refreshSubject,
+    updateScore, reorderAssessmentsLocal,
+    refreshPeriods, refreshStudents, refreshScores, refreshSubject,
   } = useGradebook(id);
 
   const [studentsOpen, setStudentsOpen] = useState(false);
@@ -113,6 +114,7 @@ export default function GradebookPage() {
           scores={scores}
           onUpdateScore={updateScore}
           onRefreshPeriods={refreshPeriods}
+          onReorderLocal={reorderAssessmentsLocal}
         />
       </div>
 

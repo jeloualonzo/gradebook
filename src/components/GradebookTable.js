@@ -23,7 +23,7 @@ const PERIOD_COLORS = {
 const STICKY_NO = 'sticky-col';
 const STICKY_NAME = 'sticky-col-2';
 
-export default function GradebookTable({ subject, periods, students, scores, onUpdateScore, onRefreshPeriods }) {
+export default function GradebookTable({ subject, periods, students, scores, onUpdateScore, onRefreshPeriods, onReorderLocal }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
   const [newAssessmentName, setNewAssessmentName] = useState('');
@@ -40,17 +40,29 @@ export default function GradebookTable({ subject, periods, students, scores, onU
     onRefreshPeriods();
   };
 
-  const handleDragEnd = async (event, periodId, currentAssessments) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIdx = currentAssessments.findIndex(a => a.id === active.id);
-    const newIdx = currentAssessments.findIndex(a => a.id === over.id);
-    const reordered = arrayMove(currentAssessments, oldIdx, newIdx);
-    await fetch(`/api/assessments/${active.id}`, {
+  const persistOrder = async (ids) => {
+    await fetch(`/api/assessments/${ids[0]}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reorder: true, ids: reordered.map(a => a.id) }),
+      body: JSON.stringify({ reorder: true, ids }),
     });
+  };
+
+  const handleDragEnd = async (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const periodId = active.data.current?.periodId;
+    // Assessments can only be reordered WITHIN their own grading period.
+    if (!periodId || over.data.current?.periodId !== periodId) return;
+    const period = periods.find(p => p.id === periodId);
+    if (!period) return;
+    const oldIds = period.assessments.map(a => a.id);
+    const oldIdx = oldIds.indexOf(active.id);
+    const newIdx = oldIds.indexOf(over.id);
+    if (oldIdx < 0 || newIdx < 0) return;
+    const newIds = arrayMove(oldIds, oldIdx, newIdx);
+    onReorderLocal?.(periodId, newIds); // layout updates immediately on drop
+    await persistOrder(newIds); // persist the new order in the database
     onRefreshPeriods();
   };
 
@@ -63,6 +75,7 @@ export default function GradebookTable({ subject, periods, students, scores, onU
   }
 
   return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
     <div className="overflow-x-auto w-full">
       <table className="gradebook-table w-max text-xs">
         {/*
@@ -151,16 +164,21 @@ export default function GradebookTable({ subject, periods, students, scores, onU
               const colors = PERIOD_COLORS[period.type];
               return (
                 <React.Fragment key={period.id}>
-                  {period.assessments.map(a => (
-                    <AssessmentBlock
-                      key={a.id}
-                      assessment={a}
-                      periodId={period.id}
-                      colors={colors}
-                      mode="header-name"
-                      onRefresh={onRefreshPeriods}
-                    />
-                  ))}
+                  <SortableContext
+                    items={period.assessments.map(a => a.id)}
+                    strategy={horizontalListSortingStrategy}
+                  >
+                    {period.assessments.map(a => (
+                      <AssessmentBlock
+                        key={a.id}
+                        assessment={a}
+                        periodId={period.id}
+                        colors={colors}
+                        mode="header-name"
+                        onRefresh={onRefreshPeriods}
+                      />
+                    ))}
+                  </SortableContext>
                   <th
                     rowSpan={3}
                     className={`${colors.light} ${colors.text} text-center font-semibold px-2 py-1.5`}
@@ -271,5 +289,6 @@ export default function GradebookTable({ subject, periods, students, scores, onU
         </tbody>
       </table>
     </div>
+    </DndContext>
   );
 }

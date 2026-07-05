@@ -53,6 +53,17 @@ export function useGradebook(subjectId) {
     }));
   }, []);
 
+  // Reorder a period's assessments in local state immediately (optimistic),
+  // so the layout updates the moment a drag is dropped.
+  const reorderAssessmentsLocal = useCallback((periodId, orderedIds) => {
+    setPeriods(prev => prev.map(p => {
+      if (p.id !== periodId) return p;
+      const byId = new Map(p.assessments.map(a => [a.id, a]));
+      const reordered = orderedIds.map(oid => byId.get(oid)).filter(Boolean);
+      return reordered.length === p.assessments.length ? { ...p, assessments: reordered } : p;
+    }));
+  }, []);
+
   const refreshPeriods = useCallback(async () => {
     try {
       const res = await fetch(`/api/subjects/${subjectId}/periods`);
@@ -104,6 +115,7 @@ export function useGradebook(subjectId) {
   return {
     subject, periods, students, scores,
     loading, error,
-    updateScore, refreshPeriods, refreshStudents, refreshScores, refreshSubject,
+    updateScore, reorderAssessmentsLocal,
+    refreshPeriods, refreshStudents, refreshScores, refreshSubject,
   };
 }

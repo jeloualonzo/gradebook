@@ -3,6 +3,35 @@ import { useState } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 import { formatNumber } from '@/lib/gradeCalculator';
 import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+/**
+ * Sortable <th> wrapper for the assessment name header cell. Dragging this
+ * block reorders the assessment within its own grading period.
+ */
+function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    data: { periodId },
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  return (
+    <th
+      ref={setNodeRef}
+      colSpan={colSpan}
+      style={style}
+      className={`${className} ${isDragging ? 'opacity-60 ring-2 ring-blue-400 relative z-30' : dragDisabled ? '' : 'cursor-grab active:cursor-grabbing'}`}
+      {...attributes}
+      {...(dragDisabled ? {} : listeners)}
+    >
+      {children}
+    </th>
+  );
+}
 
 export default function AssessmentBlock({ assessment, periodId, colors, mode, onRefresh }) {
   const [editingName, setEditingName] = useState(false);
@@ -120,8 +149,11 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
 
   if (mode === 'header-name') {
     return (
-      <th
+      <SortableHeaderCell
+        id={assessment.id}
+        periodId={periodId}
         colSpan={colSpan}
+        dragDisabled={editingName || editingWeight || confirmDelete}
         className={`${colors.light} border-r border-b border-gray-200 text-center px-2 py-1.5`}
       >
         <div className="flex items-center justify-center gap-1">
@@ -202,9 +234,9 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
           onClose={() => setConfirmDelete(false)}
           onConfirm={deleteAssessment}
           title="Delete Assessment"
-          message={`Delete "${assessment.name}"? All scores in this category will be removed.`}
+          message={`Delete "${assessment.is_exam ? 'Exam' : assessment.name}"? All scores in this category will be removed.`}
         />
-      </th>
+      </SortableHeaderCell>
     );
   }
 
