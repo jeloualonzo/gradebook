@@ -1,11 +1,14 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function Toast({ message, type = 'success', onDone }) {
   const [visible, setVisible] = useState(true);
+  // Keep the latest onDone in a ref so the timer effect can safely run once.
+  const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; });
 
   useEffect(() => {
-    const t = setTimeout(() => { setVisible(false); onDone?.(); }, 2500);
+    const t = setTimeout(() => { setVisible(false); onDoneRef.current?.(); }, 2500);
     return () => clearTimeout(t);
   }, []);
 

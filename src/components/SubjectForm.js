@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 const SCHOOL_YEARS = (() => {
   const years = [];
@@ -21,13 +21,9 @@ export default function SubjectForm({ initial = {}, onSubmit, onCancel, loading 
     final_weight: initial.final_weight ?? 40,
   });
 
-  const [weightError, setWeightError] = useState('');
-
   const totalWeight = Number(form.prelim_weight) + Number(form.midterm_weight) + Number(form.final_weight);
-
-  useEffect(() => {
-    setWeightError(Math.abs(totalWeight - 100) > 0.01 ? 'Period weights must sum to 100%.' : '');
-  }, [totalWeight]);
+  // Derived directly from form state — no effect/state needed.
+  const weightError = Math.abs(totalWeight - 100) > 0.01 ? 'Period weights must sum to 100%.' : '';
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 

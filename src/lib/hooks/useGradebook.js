@@ -10,7 +10,8 @@ export function useGradebook(subjectId) {
   const [error, setError] = useState(null);
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
+    // NOTE: loading starts as true in state, so no synchronous setState is
+    // needed here (fetchAll only runs on mount / subjectId change).
     setError(null);
     try {
       const [subjectRes, periodsRes, studentsRes, scoresRes] = await Promise.all([
@@ -41,7 +42,9 @@ export function useGradebook(subjectId) {
     }
   }, [subjectId]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    (async () => { await fetchAll(); })();
+  }, [fetchAll]);
 
   const updateScore = useCallback((columnId, studentId, value) => {
     setScores(prev => ({

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import SubjectCard from '@/components/SubjectCard';
 import Modal from '@/components/Modal';
 import SubjectForm from '@/components/SubjectForm';
@@ -14,7 +14,12 @@ export default function HomePage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const fetchSubjects = async () => {
+  const showToast = useCallback(
+    (message, type = 'success') => setToast({ message, type, key: Date.now() }),
+    []
+  );
+
+  const fetchSubjects = useCallback(async () => {
     try {
       const res = await fetch('/api/subjects');
       const data = await res.json();
@@ -28,11 +33,11 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
 
-  useEffect(() => { fetchSubjects(); }, []);
-
-  const showToast = (message, type = 'success') => setToast({ message, type, key: Date.now() });
+  useEffect(() => {
+    (async () => { await fetchSubjects(); })();
+  }, [fetchSubjects]);
 
   const handleAdd = async (form) => {
     setSaving(true);

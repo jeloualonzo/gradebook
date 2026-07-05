@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Toast from '@/components/Toast';
@@ -31,7 +31,6 @@ function AttendanceContent() {
   const [date, setDate] = useState(todayLocalISO());
   const [statuses, setStatuses] = useState({});
   const [config, setConfig] = useState({ present_score: 10, late_score: 8, absent_score: 0 });
-  const [attendanceAssessmentId, setAttendanceAssessmentId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -45,32 +44,38 @@ function AttendanceContent() {
       const studentsData = await studentsRes.json();
       setPeriods(periodsData);
       setStudents(studentsData);
-
-      if (!selectedPeriodId && periodsData.length > 0) {
-        setSelectedPeriodId(String(periodsData[0].id));
-      }
+      // Default to the first period without re-running this effect on change.
+      setSelectedPeriodId(prev => prev || (periodsData.length > 0 ? String(periodsData[0].id) : ''));
     }
     load();
   }, [id]);
 
-  useEffect(() => {
-    if (!selectedPeriodId) return;
-    const period = periods.find(p => String(p.id) === String(selectedPeriodId));
-    if (!period) return;
+  const selectedPeriod = useMemo(
+    () => periods.find(p => String(p.id) === String(selectedPeriodId)) || null,
+    [periods, selectedPeriodId]
+  );
 
-    if (period.attendanceConfig) {
+  // Derived — no state/effect needed.
+  const attendanceAssessmentId = useMemo(() => {
+    const att = selectedPeriod?.assessments?.find(a => a.name.toLowerCase() === 'attendance');
+    return att?.id || null;
+  }, [selectedPeriod]);
+
+  // Sync editable config + reset statuses when the period (or its saved
+  // config) changes — render-time adjustment per React docs.
+  const [prevPeriodKey, setPrevPeriodKey] = useState(null);
+  const periodKey = selectedPeriod ? `${selectedPeriod.id}` : null;
+  if (periodKey !== prevPeriodKey) {
+    setPrevPeriodKey(periodKey);
+    setStatuses({});
+    if (selectedPeriod?.attendanceConfig) {
       setConfig({
-        present_score: period.attendanceConfig.present_score,
-        late_score: period.attendanceConfig.late_score,
-        absent_score: period.attendanceConfig.absent_score,
+        present_score: selectedPeriod.attendanceConfig.present_score,
+        late_score: selectedPeriod.attendanceConfig.late_score,
+        absent_score: selectedPeriod.attendanceConfig.absent_score,
       });
     }
-
-    const attAssessment = period.assessments?.find(a => a.name.toLowerCase() === 'attendance');
-    setAttendanceAssessmentId(attAssessment?.id || null);
-
-    setStatuses({});
-  }, [selectedPeriodId, periods]);
+  }
 
   const setStatus = (studentId, status) => {
     setStatuses(prev => ({ ...prev, [studentId]: status }));
