@@ -49,7 +49,6 @@ export default function ScoreCell({ columnId, studentId, initialValue, maxScore,
       className={`score-cell w-full text-center text-xs py-1.5 border-0 focus:bg-blue-50 transition-colors ${
         isEmpty ? 'missing-score' : isOver ? 'bg-red-50 text-red-700' : 'bg-white'
       }`}
-      style={{ minWidth: '25px' }}
     />
   );
 }

@@ -6,6 +6,13 @@ import { formatGrade, computePeriodGrade, computeFinalSubjectGrade } from '@/lib
 import AssessmentBlock from './AssessmentBlock';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import {
+  ASSESSMENT_COL_WIDTH_PX,
+  GRADE_COL_WIDTH_PX,
+  FINAL_GRADE_COL_WIDTH_PX,
+  NUM_COL_WIDTH_PX,
+  NAME_COL_WIDTH_PX,
+} from '@/lib/uiConfig';
 
 const PERIOD_COLORS = {
   PRELIM: { header: 'bg-blue-700', light: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700' },
@@ -57,7 +64,27 @@ export default function GradebookTable({ subject, periods, students, scores, onU
 
   return (
     <div className="overflow-x-auto w-full">
-      <table className="gradebook-table min-w-max text-xs">
+      <table className="gradebook-table w-max text-xs">
+        {/*
+          Explicit column widths (table-layout: fixed). Every assessment
+          date/score column gets ASSESSMENT_COL_WIDTH_PX from src/lib/uiConfig.js —
+          change that constant to resize the whole grid.
+        */}
+        <colgroup>
+          <col style={{ width: `${NUM_COL_WIDTH_PX}px` }} />
+          <col style={{ width: `${NAME_COL_WIDTH_PX}px` }} />
+          {periods.map(period => (
+            <React.Fragment key={period.id}>
+              {period.assessments.map(a =>
+                Array.from({ length: Math.max(a.columns.length, 1) }).map((_, i) => (
+                  <col key={`${a.id}-${i}`} style={{ width: `${ASSESSMENT_COL_WIDTH_PX}px` }} />
+                ))
+              )}
+              <col style={{ width: `${GRADE_COL_WIDTH_PX}px` }} />
+            </React.Fragment>
+          ))}
+          <col style={{ width: `${FINAL_GRADE_COL_WIDTH_PX}px` }} />
+        </colgroup>
         <thead>
           {/* Row 1: Period Headers */}
           <tr>

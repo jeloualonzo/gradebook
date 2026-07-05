@@ -195,8 +195,8 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
   if (mode === 'header-dates') {
     if (assessment.columns.length === 0) {
       return (
-        <th className="border-r border-gray-200 px-0.5 py-0.5 text-center" style={{ minWidth: '25px' }}>
-          <span className="text-[10px] text-gray-300 py-0.5">--</span>
+        <th className="border-r border-gray-200 px-0 py-0.5 text-center">
+          <span className="block text-[9px] text-gray-300 py-0.5">--</span>
         </th>
       );
     }
@@ -204,36 +204,35 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
     return (
       <>
         {assessment.columns.map(col => (
-          <th key={col.id} className="border-r border-gray-200 px-0.5 py-0.5 text-center" style={{ minWidth: '25px' }}>
-            <div className="flex items-center justify-center gap-1">
-              {editingDate === col.id ? (
-                <input
-                  type="date"
-                  autoFocus
-                  className="w-full text-[10px] border border-blue-400 bg-white text-center focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
-                  defaultValue={toDateInputValue(col.date)}
-                  onFocus={e => { try { e.target.showPicker?.(); } catch {} }}
-                  onBlur={e => commitDate(col, e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && e.target.blur()}
-                />
-              ) : (
-                <span
-                  className="text-[10px] cursor-pointer hover:text-blue-600 py-0.5"
-                  onClick={() => setEditingDate(col.id)}
-                >
-                  {formatDateMMDDYYYY(col.date)}
-                </span>
-              )}
-              <button
-                onClick={() => handleDeleteColumn(col.id)}
-                className="text-gray-300 hover:text-red-500 transition-colors"
-                title="Remove column"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                </svg>
-              </button>
-            </div>
+          <th key={col.id} className="group relative border-r border-gray-200 px-0 py-0.5 text-center">
+            <span
+              className="block text-[9px] cursor-pointer hover:text-blue-600 py-0.5 truncate"
+              onClick={() => setEditingDate(col.id)}
+              title={formatDateMMDDYYYY(col.date)}
+            >
+              {formatDateMMDDYYYY(col.date)}
+            </span>
+            {editingDate === col.id && (
+              <input
+                type="date"
+                autoFocus
+                className="absolute left-0 top-1/2 -translate-y-1/2 z-20 text-[10px] border border-blue-400 bg-white text-center focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
+                style={{ width: '110px' }}
+                defaultValue={toDateInputValue(col.date)}
+                onFocus={e => { try { e.target.showPicker?.(); } catch {} }}
+                onBlur={e => commitDate(col, e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              />
+            )}
+            <button
+              onClick={() => handleDeleteColumn(col.id)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 hidden group-hover:block bg-white/95 rounded-sm p-0.5 text-gray-300 hover:text-red-500 transition-colors"
+              title="Remove column"
+            >
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              </svg>
+            </button>
           </th>
         ))}
         <ConfirmDialog
@@ -250,8 +249,8 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
   if (mode === 'header-max-scores') {
     if (assessment.columns.length === 0) {
       return (
-        <th className="border-r border-gray-200 px-0.5 py-0.5 text-center" style={{ minWidth: '25px' }}>
-          <span className="text-[10px] text-gray-300 py-0.5">--</span>
+        <th className="border-r border-gray-200 px-0 py-0.5 text-center">
+          <span className="block text-[9px] text-gray-300 py-0.5">--</span>
         </th>
       );
     }
@@ -259,7 +258,7 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
     return (
       <>
         {assessment.columns.map(col => (
-          <th key={col.id} className="border-r border-gray-200 px-0.5 py-0.5 text-center" style={{ minWidth: '25px' }}>
+          <th key={col.id} className="border-r border-gray-200 px-0 py-0.5 text-center">
             <input
               type="number"
               min="0"
