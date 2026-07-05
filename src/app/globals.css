@@ -84,22 +84,42 @@ input[type="number"] {
   background: #fef9c3 !important;
 }
 
-/* --- Active-row indication (subtle) ---------------------------------------
+/* --- Active-row indication -------------------------------------------------
    Long rows are easy to misread, so the row under the mouse — and the row
-   containing the focused cell while typing — gets a gentle tint. Inset
-   shadows layer the tint ON TOP of each cell's own background, so the
-   white/yellow(missing)/red(over-max) signals stay visible underneath. */
-.gradebook-table tbody tr:hover td {
-  box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.05);
+   containing the focused cell while typing — gets a soft blue tint.
+   NOTE: background-color (not box-shadow) is used on table cells because
+   Chrome renders box-shadows unreliably under border-collapse: collapse.
+   Score inputs paint their own backgrounds, so they get an inset-shadow
+   overlay instead — the missing-score yellow / over-max red stay visible. */
+.gradebook-table tbody tr:hover td,
+.gradebook-table tbody tr:hover td.sticky-col,
+.gradebook-table tbody tr:hover td.sticky-col-2 {
+  background-color: #e9f1fe;
+}
+.gradebook-table tbody tr:hover td.grade-col {
+  background-color: #ddeafd;
+}
+.gradebook-table tbody tr:hover td.final-grade-col {
+  background-color: #d5e5fc;
 }
 .gradebook-table tbody tr:hover .score-cell {
-  box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.05);
-}
-.gradebook-table tbody tr:focus-within td {
   box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.08);
+}
+
+/* Typing: the focused cell's row stays lit a touch stronger. */
+.gradebook-table tbody tr:focus-within td,
+.gradebook-table tbody tr:focus-within td.sticky-col,
+.gradebook-table tbody tr:focus-within td.sticky-col-2 {
+  background-color: #ddeafd;
+}
+.gradebook-table tbody tr:focus-within td.grade-col {
+  background-color: #d0e2fc;
+}
+.gradebook-table tbody tr:focus-within td.final-grade-col {
+  background-color: #c8ddfb;
 }
 .gradebook-table tbody tr:focus-within .score-cell {
-  box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.08);
+  box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.11);
 }
 
 /* The focused cell itself keeps its blue ring above the row tint. */
@@ -109,12 +129,12 @@ input[type="number"] {
   box-shadow: inset 0 0 0 2px #3b82f6;
 }
 
-/* Quick anchor: the row number pops slightly on the active row, so you can
-   confirm at a glance which student you're on. */
-.gradebook-table tbody tr:hover .sticky-col,
-.gradebook-table tbody tr:focus-within .sticky-col {
+/* Quick anchor: the row number pops on the active row, so you can confirm
+   at a glance which student you're on. */
+.gradebook-table tbody tr:hover td.sticky-col,
+.gradebook-table tbody tr:focus-within td.sticky-col {
   color: #2563eb;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .period-header {
