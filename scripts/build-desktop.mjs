@@ -57,7 +57,28 @@ function ensureElectronBinary() {
   return bin;
 }
 
+// The root node_modules copy must stay on the SYSTEM Node ABI — `next build`
+// itself loads it while collecting page data. If a previous desktop build
+// corrupted it (Next standalone output can HARD-LINK node_modules files on
+// Windows, so writing the Electron binary "into the bundle" also rewrote the
+// root copy), restore the Node prebuild before doing anything else.
+function ensureRootNodeAbi() {
+  const rootSqlite = path.join(root, 'node_modules', 'better-sqlite3');
+  // NB: the binding loads lazily inside `new Database()` — a bare require()
+  // succeeds even with a wrong-ABI binary, so the probe must construct one.
+  const probe = spawnSync(
+    node,
+    ['-e', `const D = require(${JSON.stringify(rootSqlite)}); new D(':memory:').prepare('SELECT 1').get();`],
+    { stdio: 'pipe' }
+  );
+  if (probe.status === 0) return;
+  console.log('\n→ root better-sqlite3 does not load under Node — restoring the Node-ABI prebuild');
+  fs.rmSync(path.join(rootSqlite, 'build'), { recursive: true, force: true });
+  run(node, [path.join(root, 'node_modules', 'prebuild-install', 'bin.js')], { cwd: rootSqlite });
+}
+
 // 1. Standalone Next build (from a clean slate) --------------------------------
+ensureRootNodeAbi();
 fs.rmSync(standalone, { recursive: true, force: true });
 run(node, [path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'build'], {
   env: { ...process.env, BUILD_STANDALONE: '1' },
@@ -90,8 +111,31 @@ if (!fs.existsSync(bundledSqlite)) {
   process.exit(1);
 }
 
+// CRITICAL: Next's standalone output LINKS node_modules content instead of
+// copying it when it can — symlinked package dirs (observed on Linux for the
+// Turbopack-hashed copies) and hard-linked files (Windows). Patching the
+// Electron binary "into the bundle" THROUGH such a link corrupts the link's
+// target — which is how a desktop build overwrote the root node_modules
+// binary and broke `next build` for the web workflow. So: before writing
+// anywhere, replace links with true copies.
+function materializeDir(dir, copyFrom) {
+  let st = null;
+  try { st = fs.lstatSync(dir); } catch { return false; }
+  if (!st.isSymbolicLink()) return false;
+  fs.rmSync(dir, { recursive: true, force: true }); // removes the link itself, not its target
+  fs.cpSync(copyFrom, dir, { recursive: true, dereference: true });
+  return true;
+}
+
 const fetchPrebuild = (platform) => {
   console.log(`\n→ fetching better-sqlite3 prebuilt binary (electron ${electronVersion}, ${platform}-x64)`);
+  if (materializeDir(bundledSqlite, path.join(root, 'node_modules', 'better-sqlite3'))) {
+    console.log('  (bundle copy was a link — replaced with a real copy)');
+  }
+  // Break potential HARD links (per-file, Windows): removing the build dir
+  // unlinks the bundle's names without touching the root files' inodes, and
+  // prebuild-install then extracts fresh files.
+  fs.rmSync(path.join(bundledSqlite, 'build'), { recursive: true, force: true });
   run(node, [
     path.join(root, 'node_modules', 'prebuild-install', 'bin.js'),
     '--runtime', 'electron',
@@ -113,9 +157,18 @@ function syncHashedCopies() {
   if (fs.existsSync(srcBin) && fs.existsSync(hashedRoot)) {
     for (const name of fs.readdirSync(hashedRoot)) {
       if (name !== 'better-sqlite3' && !name.startsWith('better-sqlite3-')) continue;
-      const destDir = path.join(hashedRoot, name, 'build', 'Release');
+      const hashedDir = path.join(hashedRoot, name);
+      if (materializeDir(hashedDir, bundledSqlite)) {
+        // Was a link → now a full real copy of the already-patched bundle
+        // package (Electron binary included). Nothing more to write.
+        patched.push(`${name} (link → real copy)`);
+        continue;
+      }
+      const destDir = path.join(hashedDir, 'build', 'Release');
+      const destFile = path.join(destDir, 'better_sqlite3.node');
       fs.mkdirSync(destDir, { recursive: true });
-      fs.copyFileSync(srcBin, path.join(destDir, 'better_sqlite3.node'));
+      fs.rmSync(destFile, { force: true }); // break a potential hard link first
+      fs.copyFileSync(srcBin, destFile);
       patched.push(name);
     }
   }
@@ -157,6 +210,9 @@ fs.rmSync(verifyPath);
 // the host binary so the bundle stays locally runnable.
 const packagingForWindows = !process.argv.includes('--no-pack') && !process.argv.includes('--dir');
 if (packagingForWindows && process.platform !== 'win32') fetchPrebuild('win32');
+
+// Self-heal: make sure the dev/web copy still loads under system Node.
+ensureRootNodeAbi();
 
 // 4. Package ------------------------------------------------------------------
 if (process.argv.includes('--no-pack')) {
