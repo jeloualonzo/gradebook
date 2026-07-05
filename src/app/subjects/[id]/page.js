@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useGradebook } from '@/lib/hooks/useGradebook';
+import { useHistory } from '@/lib/hooks/useHistory';
 import GradebookTable from '@/components/GradebookTable';
 import StudentManager from '@/components/StudentManager';
 import Modal from '@/components/Modal';
@@ -21,6 +22,10 @@ export default function GradebookPage() {
   const [studentsOpen, setStudentsOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = (msg, type = 'success') => setToast({ msg, type, k: Date.now() });
+
+  // Excel-style undo/redo (Ctrl+Z / Ctrl+Y) for gradebook edits.
+  const history = useHistory({ onNotify: showToast });
+  const refreshData = () => { refreshPeriods(); refreshScores(); };
 
   if (loading) {
     return (
@@ -59,6 +64,29 @@ export default function GradebookPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-400">{students.length} student{students.length !== 1 ? 's' : ''}</span>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={history.undo}
+              disabled={!history.canUndo}
+              title="Undo (Ctrl+Z)"
+              className="p-1.5 text-gray-500 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 7v6h6" /><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+              </svg>
+            </button>
+            <button
+              onClick={history.redo}
+              disabled={!history.canRedo}
+              title="Redo (Ctrl+Y)"
+              className="p-1.5 text-gray-500 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13" />
+              </svg>
+            </button>
+          </div>
 
           <button
             onClick={() => setStudentsOpen(true)}
@@ -114,7 +142,9 @@ export default function GradebookPage() {
           scores={scores}
           onUpdateScore={updateScore}
           onRefreshPeriods={refreshPeriods}
+          onRefreshData={refreshData}
           onReorderLocal={reorderAssessmentsLocal}
+          history={history}
         />
       </div>
 

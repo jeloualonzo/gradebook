@@ -33,7 +33,17 @@ function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, ch
   );
 }
 
-export default function AssessmentBlock({ assessment, periodId, colors, mode, onRefresh }) {
+export default function AssessmentBlock({
+  assessment,
+  periodId,
+  periodAssessments,
+  colors,
+  mode,
+  onRefresh,
+  onRefreshData,
+  scores,
+  history,
+}) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -43,17 +53,77 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
   const [confirmDeleteColumn, setConfirmDeleteColumn] = useState(null);
   const [editingDate, setEditingDate] = useState(null);
 
+  // Keep local edit buffers in sync when the assessment changes externally
+  // (e.g. after an undo/redo refresh). Render-time adjustment per React docs.
+  const [prevAssessmentName, setPrevAssessmentName] = useState(assessment.name);
+  if (prevAssessmentName !== assessment.name) {
+    setPrevAssessmentName(assessment.name);
+    setName(assessment.name);
+  }
+  const [prevWeightPercent, setPrevWeightPercent] = useState(assessment.weight_percent);
+  if (prevWeightPercent !== assessment.weight_percent) {
+    setPrevWeightPercent(assessment.weight_percent);
+    setWeight(assessment.weight_percent);
+  }
+
   const colSpan = Math.max(assessment.columns.length, 1);
 
+  // Refresh periods AND scores when an operation may touch score data.
+  const refreshAll = () => (onRefreshData ? onRefreshData() : onRefresh());
+
+  // --- Low-level API helpers -------------------------------------------------
+  const putAssessment = (body) =>
+    fetch(`/api/assessments/${assessment.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  const putColumn = (colId, body) =>
+    fetch(`/api/columns/${colId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  const postColumn = async (body) => {
+    const res = await fetch(`/api/assessments/${assessment.id}/columns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    return res.ok ? json?.id : null;
+  };
+
+  const restoreScores = async (columnId, columnScores) => {
+    const entries = Object.entries(columnScores || {}).map(([sid, v]) => ({
+      column_id: columnId,
+      student_id: Number(sid),
+      value: v,
+    }));
+    if (entries.length) {
+      await fetch('/api/scores/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries }),
+      });
+    }
+  };
+
+  // --- Mutations (each records an undo/redo history entry) -------------------
   const saveName = async () => {
     setEditingName(false);
     if (name === assessment.name) return;
-    await fetch(`/api/assessments/${assessment.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
+    const oldName = assessment.name;
+    const newName = name;
+    await putAssessment({ name: newName });
     onRefresh();
+    history?.push({
+      label: 'rename assessment',
+      undo: async () => { await putAssessment({ name: oldName }); onRefresh(); },
+      redo: async () => { await putAssessment({ name: newName }); onRefresh(); },
+    });
   };
 
   const saveWeight = async () => {
@@ -61,79 +131,168 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
     const weightNum = parseFloat(weight);
     const currentWeight = parseFloat(assessment.weight_percent);
     if (Math.abs(weightNum - currentWeight) < 0.001) return;
-    await fetch(`/api/assessments/${assessment.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weight_percent: Math.round(weightNum * 100) / 100 }),
-    });
+    const oldWeight = currentWeight;
+    const newWeight = Math.round(weightNum * 100) / 100;
+    await putAssessment({ weight_percent: newWeight });
     onRefresh();
+    history?.push({
+      label: 'edit weight',
+      undo: async () => { await putAssessment({ weight_percent: oldWeight }); onRefresh(); },
+      redo: async () => { await putAssessment({ weight_percent: newWeight }); onRefresh(); },
+    });
   };
 
   const deleteAssessment = async () => {
-    await fetch(`/api/assessments/${assessment.id}`, { method: 'DELETE' });
-    onRefresh();
+    // Deep snapshot (columns + their scores + position) so undo can restore
+    // the assessment exactly as it was.
+    const oldId = assessment.id;
+    const snapshot = {
+      name: assessment.name,
+      is_exam: assessment.is_exam ? 1 : 0,
+      weight_percent: assessment.weight_percent,
+      order: (periodAssessments || []).map(a => a.id),
+      columns: (assessment.columns || []).map(c => ({
+        date: toDateInputValue(c.date) || null,
+        max_score: c.max_score,
+        scores: scores?.[c.id] ? { ...scores[c.id] } : {},
+      })),
+    };
+    await fetch(`/api/assessments/${oldId}`, { method: 'DELETE' });
+    refreshAll();
+
+    if (!history) return;
+    let currentId = null;
+    history.push({
+      label: `remove assessment "${assessment.is_exam ? 'Exam' : snapshot.name}"`,
+      undo: async () => {
+        const res = await fetch(`/api/periods/${periodId}/assessments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: snapshot.name,
+            is_exam: snapshot.is_exam,
+            weight_percent: snapshot.weight_percent,
+            skip_auto_column: true,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!json?.id) { refreshAll(); return; }
+        currentId = json.id;
+        for (const c of snapshot.columns) {
+          const colRes = await fetch(`/api/assessments/${currentId}/columns`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: c.date, max_score: c.max_score }),
+          });
+          const colJson = await colRes.json().catch(() => ({}));
+          if (colJson?.id) await restoreScores(colJson.id, c.scores);
+        }
+        // Put the restored assessment back in its original position.
+        const ids = snapshot.order.map(x => (x === oldId ? currentId : x));
+        await fetch(`/api/assessments/${currentId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reorder: true, ids }),
+        });
+        refreshAll();
+      },
+      redo: async () => {
+        if (currentId) await fetch(`/api/assessments/${currentId}`, { method: 'DELETE' });
+        refreshAll();
+      },
+    });
+  };
+
+  const pushAddColumnEntry = (createdId, body) => {
+    if (!history || !createdId) return;
+    let colId = createdId;
+    history.push({
+      label: 'add column',
+      undo: async () => {
+        await fetch(`/api/columns/${colId}`, { method: 'DELETE' });
+        refreshAll();
+      },
+      redo: async () => {
+        const newId = await postColumn(body);
+        if (newId) colId = newId;
+        refreshAll();
+      },
+    });
   };
 
   const addColumn = async () => {
-    await fetch(`/api/assessments/${assessment.id}/columns`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: null, max_score: 0 }),
-    });
+    const body = { date: null, max_score: 0 };
+    const createdId = await postColumn(body);
     onRefresh();
+    pushAddColumnEntry(createdId, body);
   };
 
   // Create this assessment's first column with the picked date. Used by the
   // clickable "--" placeholder when an assessment (e.g. a legacy Exam) has no
   // date column yet.
   const addColumnWithDate = async (date) => {
-    await fetch(`/api/assessments/${assessment.id}/columns`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date, max_score: assessment.is_exam ? 100 : 0 }),
-    });
+    const body = { date, max_score: assessment.is_exam ? 100 : 0 };
+    const createdId = await postColumn(body);
     onRefresh();
-  };
-
-  const updateMaxScore = async (colId, value) => {
-    await fetch(`/api/columns/${colId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ max_score: value }),
-    });
-    onRefresh();
-  };
-
-  const updateColumnDate = async (colId, value) => {
-    await fetch(`/api/columns/${colId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: value || null }),
-    });
-    onRefresh();
+    pushAddColumnEntry(createdId, body);
   };
 
   // Commit a date edit. Saves ONLY when the value actually changed, so
   // clicking a date and clicking away never mutates it.
-  const commitDate = (col, inputValue) => {
+  const commitDate = async (col, inputValue) => {
     setEditingDate(null);
     const prev = toDateInputValue(col.date);
     const next = inputValue || '';
     if (next === prev) return;
-    updateColumnDate(col.id, next || null);
+    const apply = async (v) => { await putColumn(col.id, { date: v || null }); onRefresh(); };
+    await apply(next);
+    history?.push({
+      label: 'change date',
+      undo: () => apply(prev),
+      redo: () => apply(next),
+    });
   };
 
   // Commit a max-score edit only when the value actually changed.
-  const commitMaxScore = (col, inputValue) => {
+  const commitMaxScore = async (col, inputValue) => {
     const prev = parseFloat(col.max_score) || 0;
     const next = parseFloat(inputValue) || 0;
     if (Math.abs(next - prev) < 0.001) return;
-    updateMaxScore(col.id, inputValue);
+    const apply = async (v) => { await putColumn(col.id, { max_score: v }); onRefresh(); };
+    await apply(next);
+    history?.push({
+      label: 'change max score',
+      undo: () => apply(prev),
+      redo: () => apply(next),
+    });
   };
 
   const deleteColumn = async (colId) => {
+    const col = (assessment.columns || []).find(c => c.id === colId);
+    const columnScores = scores?.[colId] ? { ...scores[colId] } : {};
+    const body = col
+      ? { date: toDateInputValue(col.date) || null, max_score: col.max_score }
+      : null;
     await fetch(`/api/columns/${colId}`, { method: 'DELETE' });
-    onRefresh();
+    refreshAll();
+
+    if (!history || !body) return;
+    let currentId = colId;
+    history.push({
+      label: 'remove column',
+      undo: async () => {
+        const newId = await postColumn(body);
+        if (newId) {
+          currentId = newId;
+          await restoreScores(newId, columnScores);
+        }
+        refreshAll();
+      },
+      redo: async () => {
+        await fetch(`/api/columns/${currentId}`, { method: 'DELETE' });
+        refreshAll();
+      },
+    });
   };
 
   const handleDeleteColumn = (colId) => {

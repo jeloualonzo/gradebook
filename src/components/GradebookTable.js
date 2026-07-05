@@ -23,21 +23,45 @@ const PERIOD_COLORS = {
 const STICKY_NO = 'sticky-col';
 const STICKY_NAME = 'sticky-col-2';
 
-export default function GradebookTable({ subject, periods, students, scores, onUpdateScore, onRefreshPeriods, onReorderLocal }) {
+export default function GradebookTable({ subject, periods, students, scores, onUpdateScore, onRefreshPeriods, onRefreshData, onReorderLocal, history }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
   const [newAssessmentName, setNewAssessmentName] = useState('');
 
   const handleAddAssessment = async (periodId) => {
-    if (!newAssessmentName.trim()) return;
-    await fetch(`/api/periods/${periodId}/assessments`, {
+    const name = newAssessmentName.trim();
+    if (!name) return;
+    const body = { name, is_exam: 0, weight_percent: 0 };
+    const res = await fetch(`/api/periods/${periodId}/assessments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newAssessmentName.trim(), is_exam: 0, weight_percent: 0 }),
+      body: JSON.stringify(body),
     });
+    const created = await res.json().catch(() => ({}));
     setNewAssessmentName('');
     setAddingAssessment(null);
     onRefreshPeriods();
+
+    if (res.ok && created?.id && history) {
+      let assessmentId = created.id;
+      history.push({
+        label: `add assessment "${name}"`,
+        undo: async () => {
+          await fetch(`/api/assessments/${assessmentId}`, { method: 'DELETE' });
+          onRefreshPeriods();
+        },
+        redo: async () => {
+          const r = await fetch(`/api/periods/${periodId}/assessments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (j?.id) assessmentId = j.id;
+          onRefreshPeriods();
+        },
+      });
+    }
   };
 
   const persistOrder = async (ids) => {
@@ -64,6 +88,20 @@ export default function GradebookTable({ subject, periods, students, scores, onU
     onReorderLocal?.(periodId, newIds); // layout updates immediately on drop
     await persistOrder(newIds); // persist the new order in the database
     onRefreshPeriods();
+
+    history?.push({
+      label: 'move assessment',
+      undo: async () => {
+        onReorderLocal?.(periodId, oldIds);
+        await persistOrder(oldIds);
+        onRefreshPeriods();
+      },
+      redo: async () => {
+        onReorderLocal?.(periodId, newIds);
+        await persistOrder(newIds);
+        onRefreshPeriods();
+      },
+    });
   };
 
   if (!students.length) {
@@ -173,9 +211,13 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                         key={a.id}
                         assessment={a}
                         periodId={period.id}
+                        periodAssessments={period.assessments}
                         colors={colors}
                         mode="header-name"
                         onRefresh={onRefreshPeriods}
+                        onRefreshData={onRefreshData}
+                        scores={scores}
+                        history={history}
                       />
                     ))}
                   </SortableContext>
@@ -201,9 +243,13 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                       key={a.id}
                       assessment={a}
                       periodId={period.id}
+                      periodAssessments={period.assessments}
                       colors={colors}
                       mode="header-dates"
                       onRefresh={onRefreshPeriods}
+                      onRefreshData={onRefreshData}
+                      scores={scores}
+                      history={history}
                     />
                   ))}
                 </React.Fragment>
@@ -222,9 +268,13 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                       key={a.id}
                       assessment={a}
                       periodId={period.id}
+                      periodAssessments={period.assessments}
                       colors={colors}
                       mode="header-max-scores"
                       onRefresh={onRefreshPeriods}
+                      onRefreshData={onRefreshData}
+                      scores={scores}
+                      history={history}
                     />
                   ))}
                 </React.Fragment>
@@ -264,6 +314,7 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                                 initialValue={scores?.[col.id]?.[student.id]}
                                 maxScore={col.max_score}
                                 onUpdate={onUpdateScore}
+                                history={history}
                               />
                             </td>
                           ))
