@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useGradebook } from '@/lib/hooks/useGradebook';
@@ -16,18 +16,31 @@ export default function GradebookPage() {
   const {
     subject, periods, students, scores,
     loading, error,
-    updateScore, reorderAssessmentsLocal,
+    updateScore, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
     refreshPeriods, refreshStudents, refreshScores, refreshSubject,
   } = useGradebook(id);
 
   const [studentsOpen, setStudentsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState(null);
-  const showToast = (msg, type = 'success') => setToast({ msg, type, k: Date.now() });
+  const showToast = useCallback((msg, type = 'success') => setToast({ msg, type, k: Date.now() }), []);
 
   // Excel-style undo/redo (Ctrl+Z / Ctrl+Y) for gradebook edits.
   const history = useHistory({ onNotify: showToast });
-  const refreshData = () => { refreshPeriods(); refreshScores(); };
+  const refreshData = useCallback(() => { refreshPeriods(); refreshScores(); }, [refreshPeriods, refreshScores]);
+  const handleSaveError = useCallback((msg) => showToast(msg || 'Save failed — value restored.', 'error'), [showToast]);
+
+  // Ref mirrors so memoized children receive STABLE getter props while still
+  // reading fresh data at event time (avoids re-rendering the whole grid).
+  const scoresRef = useRef(scores);
+  const periodsRef = useRef(periods);
+  useEffect(() => { scoresRef.current = scores; }, [scores]);
+  useEffect(() => { periodsRef.current = periods; }, [periods]);
+  const getScores = useCallback(() => scoresRef.current, []);
+  const getPeriodOrder = useCallback((periodId) => {
+    const p = periodsRef.current.find(x => x.id === periodId);
+    return (p?.assessments || []).map(a => a.id);
+  }, []);
 
   if (loading) {
     return (
@@ -157,7 +170,12 @@ export default function GradebookPage() {
           onRefreshPeriods={refreshPeriods}
           onRefreshData={refreshData}
           onReorderLocal={reorderAssessmentsLocal}
-          history={history}
+          onPatchAssessment={patchAssessmentLocal}
+          onPatchColumn={patchColumnLocal}
+          getScores={getScores}
+          getPeriodOrder={getPeriodOrder}
+          onHistoryPush={history.push}
+          onSaveError={handleSaveError}
         />
       </div>
 

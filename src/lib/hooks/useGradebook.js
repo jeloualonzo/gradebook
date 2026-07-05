@@ -56,6 +56,34 @@ export function useGradebook(subjectId) {
     }));
   }, []);
 
+  // Optimistically patch one assessment's fields in local state.
+  // Only the target assessment object changes identity, so memoized header
+  // cells for every other assessment skip re-rendering.
+  const patchAssessmentLocal = useCallback((assessmentId, patch) => {
+    setPeriods(prev => prev.map(p => {
+      if (!p.assessments?.some(a => a.id === assessmentId)) return p;
+      return {
+        ...p,
+        assessments: p.assessments.map(a => (a.id === assessmentId ? { ...a, ...patch } : a)),
+      };
+    }));
+  }, []);
+
+  // Optimistically patch one assessment column (date / max score).
+  const patchColumnLocal = useCallback((columnId, patch) => {
+    setPeriods(prev => prev.map(p => {
+      if (!p.assessments?.some(a => a.columns?.some(c => c.id === columnId))) return p;
+      return {
+        ...p,
+        assessments: p.assessments.map(a =>
+          a.columns?.some(c => c.id === columnId)
+            ? { ...a, columns: a.columns.map(c => (c.id === columnId ? { ...c, ...patch } : c)) }
+            : a
+        ),
+      };
+    }));
+  }, []);
+
   // Reorder a period's assessments in local state immediately (optimistic),
   // so the layout updates the moment a drag is dropped.
   const reorderAssessmentsLocal = useCallback((periodId, orderedIds) => {
@@ -118,7 +146,7 @@ export function useGradebook(subjectId) {
   return {
     subject, periods, students, scores,
     loading, error,
-    updateScore, reorderAssessmentsLocal,
+    updateScore, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
     refreshPeriods, refreshStudents, refreshScores, refreshSubject,
   };
 }

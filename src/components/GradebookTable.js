@@ -23,7 +23,22 @@ const PERIOD_COLORS = {
 const STICKY_NO = 'sticky-col';
 const STICKY_NAME = 'sticky-col-2';
 
-export default function GradebookTable({ subject, periods, students, scores, onUpdateScore, onRefreshPeriods, onRefreshData, onReorderLocal, history }) {
+export default function GradebookTable({
+  subject,
+  periods,
+  students,
+  scores,
+  onUpdateScore,
+  onRefreshPeriods,
+  onRefreshData,
+  onReorderLocal,
+  onPatchAssessment,
+  onPatchColumn,
+  getScores,
+  getPeriodOrder,
+  onHistoryPush,
+  onSaveError,
+}) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
   const [newAssessmentName, setNewAssessmentName] = useState('');
@@ -42,9 +57,9 @@ export default function GradebookTable({ subject, periods, students, scores, onU
     setAddingAssessment(null);
     onRefreshPeriods();
 
-    if (res.ok && created?.id && history) {
+    if (res.ok && created?.id && onHistoryPush) {
       let assessmentId = created.id;
-      history.push({
+      onHistoryPush({
         label: `add assessment "${name}"`,
         undo: async () => {
           await fetch(`/api/assessments/${assessmentId}`, { method: 'DELETE' });
@@ -89,7 +104,7 @@ export default function GradebookTable({ subject, periods, students, scores, onU
     await persistOrder(newIds); // persist the new order in the database
     onRefreshPeriods();
 
-    history?.push({
+    onHistoryPush?.({
       label: 'move assessment',
       undo: async () => {
         onReorderLocal?.(periodId, oldIds);
@@ -211,13 +226,16 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                         key={a.id}
                         assessment={a}
                         periodId={period.id}
-                        periodAssessments={period.assessments}
                         colors={colors}
                         mode="header-name"
                         onRefresh={onRefreshPeriods}
                         onRefreshData={onRefreshData}
-                        scores={scores}
-                        history={history}
+                        onPatchAssessment={onPatchAssessment}
+                        onPatchColumn={onPatchColumn}
+                        getScores={getScores}
+                        getPeriodOrder={getPeriodOrder}
+                        onHistoryPush={onHistoryPush}
+                        onSaveError={onSaveError}
                       />
                     ))}
                   </SortableContext>
@@ -243,13 +261,16 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                       key={a.id}
                       assessment={a}
                       periodId={period.id}
-                      periodAssessments={period.assessments}
                       colors={colors}
                       mode="header-dates"
                       onRefresh={onRefreshPeriods}
                       onRefreshData={onRefreshData}
-                      scores={scores}
-                      history={history}
+                      onPatchAssessment={onPatchAssessment}
+                      onPatchColumn={onPatchColumn}
+                      getScores={getScores}
+                      getPeriodOrder={getPeriodOrder}
+                      onHistoryPush={onHistoryPush}
+                      onSaveError={onSaveError}
                     />
                   ))}
                 </React.Fragment>
@@ -268,13 +289,16 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                       key={a.id}
                       assessment={a}
                       periodId={period.id}
-                      periodAssessments={period.assessments}
                       colors={colors}
                       mode="header-max-scores"
                       onRefresh={onRefreshPeriods}
                       onRefreshData={onRefreshData}
-                      scores={scores}
-                      history={history}
+                      onPatchAssessment={onPatchAssessment}
+                      onPatchColumn={onPatchColumn}
+                      getScores={getScores}
+                      getPeriodOrder={getPeriodOrder}
+                      onHistoryPush={onHistoryPush}
+                      onSaveError={onSaveError}
                     />
                   ))}
                 </React.Fragment>
@@ -314,7 +338,8 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                                 initialValue={scores?.[col.id]?.[student.id]}
                                 maxScore={col.max_score}
                                 onUpdate={onUpdateScore}
-                                history={history}
+                                onHistoryPush={onHistoryPush}
+                                onSaveError={onSaveError}
                               />
                             </td>
                           ))

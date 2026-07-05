@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 import { formatNumber, toCents, centsToNumber } from '@/lib/gradeCalculator';
 import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
@@ -33,16 +33,19 @@ function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, ch
   );
 }
 
-export default function AssessmentBlock({
+function AssessmentBlock({
   assessment,
   periodId,
-  periodAssessments,
   colors,
   mode,
   onRefresh,
   onRefreshData,
-  scores,
-  history,
+  onPatchAssessment,
+  onPatchColumn,
+  getScores,
+  getPeriodOrder,
+  onHistoryPush,
+  onSaveError,
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
@@ -71,20 +74,24 @@ export default function AssessmentBlock({
   // Refresh periods AND scores when an operation may touch score data.
   const refreshAll = () => (onRefreshData ? onRefreshData() : onRefresh());
 
-  // --- Low-level API helpers -------------------------------------------------
-  const putAssessment = (body) =>
-    fetch(`/api/assessments/${assessment.id}`, {
+  // --- Low-level API helpers (throw on failure so callers can roll back) ----
+  const putAssessment = async (body) => {
+    const res = await fetch(`/api/assessments/${assessment.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (!res.ok) throw new Error('Save failed');
+  };
 
-  const putColumn = (colId, body) =>
-    fetch(`/api/columns/${colId}`, {
+  const putColumn = async (colId, body) => {
+    const res = await fetch(`/api/columns/${colId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (!res.ok) throw new Error('Save failed');
+  };
 
   const postColumn = async (body) => {
     const res = await fetch(`/api/assessments/${assessment.id}/columns`, {
@@ -111,18 +118,31 @@ export default function AssessmentBlock({
     }
   };
 
-  // --- Mutations (each records an undo/redo history entry) -------------------
+  // --- Mutations --------------------------------------------------------------
+  // Value edits are OPTIMISTIC: patch local state instantly, save in the
+  // background, and roll back (with an error toast) if the save fails.
+  // No full gradebook refetch happens for simple value edits.
+
   const saveName = async () => {
     setEditingName(false);
-    if (name === assessment.name) return;
+    const newName = name.trim();
     const oldName = assessment.name;
-    const newName = name;
-    await putAssessment({ name: newName });
-    onRefresh();
-    history?.push({
+    if (!newName || newName === oldName) {
+      setName(oldName);
+      return;
+    }
+    onPatchAssessment(assessment.id, { name: newName }); // instant UI
+    try {
+      await putAssessment({ name: newName }); // silent background save
+    } catch {
+      onPatchAssessment(assessment.id, { name: oldName }); // rollback
+      onSaveError?.('Could not save the assessment name — value restored.');
+      return;
+    }
+    onHistoryPush?.({
       label: 'rename assessment',
-      undo: async () => { await putAssessment({ name: oldName }); onRefresh(); },
-      redo: async () => { await putAssessment({ name: newName }); onRefresh(); },
+      undo: async () => { onPatchAssessment(assessment.id, { name: oldName }); await putAssessment({ name: oldName }); },
+      redo: async () => { onPatchAssessment(assessment.id, { name: newName }); await putAssessment({ name: newName }); },
     });
   };
 
@@ -138,12 +158,18 @@ export default function AssessmentBlock({
     }
     const oldWeight = centsToNumber(oldCents);
     const newWeight = centsToNumber(newCents);
-    await putAssessment({ weight_percent: newWeight });
-    onRefresh();
-    history?.push({
+    onPatchAssessment(assessment.id, { weight_percent: newWeight }); // instant UI
+    try {
+      await putAssessment({ weight_percent: newWeight });
+    } catch {
+      onPatchAssessment(assessment.id, { weight_percent: oldWeight });
+      onSaveError?.('Could not save the weight — value restored.');
+      return;
+    }
+    onHistoryPush?.({
       label: 'edit weight',
-      undo: async () => { await putAssessment({ weight_percent: oldWeight }); onRefresh(); },
-      redo: async () => { await putAssessment({ weight_percent: newWeight }); onRefresh(); },
+      undo: async () => { onPatchAssessment(assessment.id, { weight_percent: oldWeight }); await putAssessment({ weight_percent: oldWeight }); },
+      redo: async () => { onPatchAssessment(assessment.id, { weight_percent: newWeight }); await putAssessment({ weight_percent: newWeight }); },
     });
   };
 
@@ -151,23 +177,24 @@ export default function AssessmentBlock({
     // Deep snapshot (columns + their scores + position) so undo can restore
     // the assessment exactly as it was.
     const oldId = assessment.id;
+    const allScores = getScores?.() || {};
     const snapshot = {
       name: assessment.name,
       is_exam: assessment.is_exam ? 1 : 0,
       weight_percent: assessment.weight_percent,
-      order: (periodAssessments || []).map(a => a.id),
+      order: getPeriodOrder ? getPeriodOrder(periodId) : [],
       columns: (assessment.columns || []).map(c => ({
         date: toDateInputValue(c.date) || null,
         max_score: c.max_score,
-        scores: scores?.[c.id] ? { ...scores[c.id] } : {},
+        scores: allScores?.[c.id] ? { ...allScores[c.id] } : {},
       })),
     };
     await fetch(`/api/assessments/${oldId}`, { method: 'DELETE' });
     refreshAll();
 
-    if (!history) return;
+    if (!onHistoryPush) return;
     let currentId = null;
-    history.push({
+    onHistoryPush({
       label: `remove assessment "${assessment.is_exam ? 'Exam' : snapshot.name}"`,
       undo: async () => {
         const res = await fetch(`/api/periods/${periodId}/assessments`, {
@@ -209,9 +236,9 @@ export default function AssessmentBlock({
   };
 
   const pushAddColumnEntry = (createdId, body) => {
-    if (!history || !createdId) return;
+    if (!onHistoryPush || !createdId) return;
     let colId = createdId;
-    history.push({
+    onHistoryPush({
       label: 'add column',
       undo: async () => {
         await fetch(`/api/columns/${colId}`, { method: 'DELETE' });
@@ -243,47 +270,65 @@ export default function AssessmentBlock({
   };
 
   // Commit a date edit. Saves ONLY when the value actually changed, so
-  // clicking a date and clicking away never mutates it.
+  // clicking a date and clicking away never mutates it. Optimistic:
+  // the new date shows instantly; the save happens silently in the background.
   const commitDate = async (col, inputValue) => {
     setEditingDate(null);
     const prev = toDateInputValue(col.date);
     const next = inputValue || '';
     if (next === prev) return;
-    const apply = async (v) => { await putColumn(col.id, { date: v || null }); onRefresh(); };
-    await apply(next);
-    history?.push({
+    const apply = (v) => onPatchColumn(col.id, { date: v || null });
+    apply(next); // instant UI
+    try {
+      await putColumn(col.id, { date: next || null });
+    } catch {
+      apply(prev);
+      onSaveError?.('Could not save the date — value restored.');
+      return;
+    }
+    onHistoryPush?.({
       label: 'change date',
-      undo: () => apply(prev),
-      redo: () => apply(next),
+      undo: async () => { apply(prev); await putColumn(col.id, { date: prev || null }); },
+      redo: async () => { apply(next); await putColumn(col.id, { date: next || null }); },
     });
   };
 
-  // Commit a max-score edit only when the value actually changed.
+  // Commit a max-score edit only when the value actually changed (cents-exact).
   const commitMaxScore = async (col, inputValue) => {
-    const prev = parseFloat(col.max_score) || 0;
-    const next = parseFloat(inputValue) || 0;
-    if (Math.abs(next - prev) < 0.001) return;
-    const apply = async (v) => { await putColumn(col.id, { max_score: v }); onRefresh(); };
-    await apply(next);
-    history?.push({
+    const newCents = toCents(inputValue);
+    const oldCents = toCents(col.max_score);
+    if (newCents === oldCents) return;
+    const oldVal = centsToNumber(oldCents);
+    const newVal = centsToNumber(newCents);
+    const apply = (v) => onPatchColumn(col.id, { max_score: v });
+    apply(newVal); // instant UI
+    try {
+      await putColumn(col.id, { max_score: newVal });
+    } catch {
+      apply(oldVal);
+      onSaveError?.('Could not save the max score — value restored.');
+      return;
+    }
+    onHistoryPush?.({
       label: 'change max score',
-      undo: () => apply(prev),
-      redo: () => apply(next),
+      undo: async () => { apply(oldVal); await putColumn(col.id, { max_score: oldVal }); },
+      redo: async () => { apply(newVal); await putColumn(col.id, { max_score: newVal }); },
     });
   };
 
   const deleteColumn = async (colId) => {
     const col = (assessment.columns || []).find(c => c.id === colId);
-    const columnScores = scores?.[colId] ? { ...scores[colId] } : {};
+    const allScores = getScores?.() || {};
+    const columnScores = allScores?.[colId] ? { ...allScores[colId] } : {};
     const body = col
       ? { date: toDateInputValue(col.date) || null, max_score: col.max_score }
       : null;
     await fetch(`/api/columns/${colId}`, { method: 'DELETE' });
     refreshAll();
 
-    if (!history || !body) return;
+    if (!onHistoryPush || !body) return;
     let currentId = colId;
-    history.push({
+    onHistoryPush({
       label: 'remove column',
       undo: async () => {
         const newId = await postColumn(body);
@@ -495,6 +540,9 @@ export default function AssessmentBlock({
         {assessment.columns.map(col => (
           <th key={col.id} className="border-r border-gray-200 px-0 py-0.5 text-center">
             <input
+              // Remount when the stored value changes (rollback / undo / redo)
+              // so this uncontrolled input always shows the current value.
+              key={`${col.id}-${formatNumber(col.max_score)}`}
               type="number"
               min="0"
               defaultValue={formatNumber(col.max_score)}
@@ -511,3 +559,8 @@ export default function AssessmentBlock({
 
   return null;
 }
+
+// Memoized: with stable callback props from the page, an edit to one
+// assessment re-renders only that assessment's header cells — not the
+// hundreds of others.
+export default memo(AssessmentBlock);
