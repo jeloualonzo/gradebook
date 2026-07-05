@@ -24,12 +24,21 @@ export async function getAssessmentsByPeriod(periodId) {
   return rows;
 }
 
-export async function createAssessment(periodId, { name, is_exam = 0, sort_order = 0, weight_percent = 0 }) {
+export async function createAssessment(periodId, { name, is_exam = 0, sort_order = 0, weight_percent = 0, skip_auto_column = false }) {
   const [result] = await pool.query(
     'INSERT INTO assessments (period_id, name, is_exam, sort_order, weight_percent) VALUES (?, ?, ?, ?, ?)',
     [periodId, name, is_exam, sort_order, weight_percent]
   );
-  return result.insertId;
+  const assessmentId = result.insertId;
+  // Every exam automatically gets exactly one date column (date is picked by
+  // the instructor later; it shows as "--" until then).
+  if (is_exam && !skip_auto_column) {
+    await pool.query(
+      'INSERT INTO assessment_columns (assessment_id, date, max_score, sort_order) VALUES (?, NULL, ?, 0)',
+      [assessmentId, 100]
+    );
+  }
+  return assessmentId;
 }
 
 export async function updateAssessment(id, { name, sort_order, weight_percent }) {

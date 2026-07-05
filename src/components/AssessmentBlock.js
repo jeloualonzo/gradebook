@@ -54,6 +54,18 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
     onRefresh();
   };
 
+  // Create this assessment's first column with the picked date. Used by the
+  // clickable "--" placeholder when an assessment (e.g. a legacy Exam) has no
+  // date column yet.
+  const addColumnWithDate = async (date) => {
+    await fetch(`/api/assessments/${assessment.id}/columns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, max_score: assessment.is_exam ? 100 : 0 }),
+    });
+    onRefresh();
+  };
+
   const updateMaxScore = async (colId, value) => {
     await fetch(`/api/columns/${colId}`, {
       method: 'PUT',
@@ -113,7 +125,11 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
         className={`${colors.light} border-r border-b border-gray-200 text-center px-2 py-1.5`}
       >
         <div className="flex items-center justify-center gap-1">
-          {editingName ? (
+          {assessment.is_exam ? (
+            // Exams are always displayed simply as "Exam" — the grading period
+            // header already indicates PRELIM / MIDTERM / FINAL.
+            <span className={`text-xs font-semibold ${colors.text}`}>Exam</span>
+          ) : editingName ? (
             <input
               autoFocus
               className="text-xs px-1 py-0.5 border border-blue-400 rounded w-28 text-center"
@@ -195,8 +211,29 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
   if (mode === 'header-dates') {
     if (assessment.columns.length === 0) {
       return (
-        <th className="border-r border-gray-200 px-0 py-0.5 text-center">
-          <span className="block text-[9px] text-gray-300 py-0.5">--</span>
+        <th className="relative border-r border-gray-200 px-0 py-0.5 text-center">
+          <span
+            className="block text-[9px] text-gray-300 cursor-pointer hover:text-blue-600 py-0.5"
+            title="Set date"
+            onClick={() => setAddingDate(true)}
+          >
+            --
+          </span>
+          {addingDate && (
+            <input
+              type="date"
+              autoFocus
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-20 text-[10px] border border-blue-400 bg-white text-center focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
+              style={{ width: '110px' }}
+              onFocus={e => { try { e.target.showPicker?.(); } catch {} }}
+              onBlur={e => {
+                const v = e.target.value;
+                setAddingDate(false);
+                if (v) addColumnWithDate(v);
+              }}
+              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+            />
+          )}
         </th>
       );
     }
@@ -224,15 +261,17 @@ export default function AssessmentBlock({ assessment, periodId, colors, mode, on
                 onKeyDown={e => e.key === 'Enter' && e.target.blur()}
               />
             )}
-            <button
-              onClick={() => handleDeleteColumn(col.id)}
-              className="absolute right-0 top-1/2 -translate-y-1/2 hidden group-hover:block bg-white/95 rounded-sm p-0.5 text-gray-300 hover:text-red-500 transition-colors"
-              title="Remove column"
-            >
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-              </svg>
-            </button>
+            {!assessment.is_exam && (
+              <button
+                onClick={() => handleDeleteColumn(col.id)}
+                className="absolute right-0 top-1/2 -translate-y-1/2 hidden group-hover:block bg-white/95 rounded-sm p-0.5 text-gray-300 hover:text-red-500 transition-colors"
+                title="Remove column"
+              >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                </svg>
+              </button>
+            )}
           </th>
         ))}
         <ConfirmDialog

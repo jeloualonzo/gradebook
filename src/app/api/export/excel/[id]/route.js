@@ -61,7 +61,7 @@ export async function GET(request, { params }) {
     for (const period of periods) {
       for (const a of period.assessments) {
         for (const col of a.columns) {
-          headers.push(`${period.type} - ${a.name}\n${col.date ? formatDateMMDDYYYY(col.date) : '--'}`);
+          headers.push(`${period.type} - ${a.is_exam ? 'Exam' : a.name}\n${col.date ? formatDateMMDDYYYY(col.date) : '--'}`);
         }
       }
       headers.push(`${period.type} Grade`);

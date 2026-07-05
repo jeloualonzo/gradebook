@@ -16,7 +16,9 @@ export function getDefaultPeriodConfig(periodType) {
     type: periodType,
     assessments: DEFAULT_ASSESSMENTS.map(a => ({
       ...a,
-      name: a.is_exam ? `${periodType.charAt(0) + periodType.slice(1).toLowerCase()} Exam` : a.name,
+      // The grading period already indicates PRELIM/MIDTERM/FINAL, so the
+      // exam is simply called "Exam" — no period prefix.
+      name: a.name,
       weight_percent: 0,
     })),
   };
@@ -94,10 +96,11 @@ export default function WizardPeriodConfig({ periodType, config, onChange }) {
               disabled={a.is_exam}
             />
             <input
-              className="flex-1 text-sm px-2 py-1 border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="flex-1 text-sm px-2 py-1 border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:text-gray-500"
               value={a.name}
               onChange={(e) => updateName(i, e.target.value)}
-              disabled={!a.enabled}
+              disabled={!a.enabled || a.is_exam}
+              title={a.is_exam ? 'The exam is always named "Exam" — the grading period already identifies it' : undefined}
             />
             {a.enabled && (
               <div className="relative w-20 shrink-0">
