@@ -6,7 +6,15 @@
  * Model (per the agreed spec):
  * - Each device exports its FULL state (every row of every synced table,
  *   INCLUDING tombstoned rows) as a snapshot.
- * - Merging compares row-by-row, matched by UUID:
+ * - Merging compares row-by-row, matched by IDENTITY KEY:
+ *     · normally the UUID id;
+ *     · tables with a natural UNIQUE constraint (scores = one row per
+ *       column+student cell, grading_periods = one per subject+type,
+ *       attendance_config = one per period) match by that natural key
+ *       instead. Two devices can create "the same" row independently with
+ *       different UUIDs — matching by natural key makes that an ordinary
+ *       newest-wins conflict (the winner's id is adopted on both sides)
+ *       instead of a UNIQUE-constraint crash.
  *     · row only in peer   → insert (tombstone and all)
  *     · row in both        → newer updated_at wins, whole row
  *     · row only local     → keep
@@ -20,9 +28,15 @@
  */
 
 export const FORMAT_VERSION = 1;
+// Snapshot COMPATIBILITY version: bump ONLY when SYNCED_TABLES' shape changes
+// (a device refuses snapshots from a newer shape and asks to be updated).
+// Independent from the database migration version in src/lib/migrations.js —
+// local-only tables (like sync_conflicts) never affect this number.
 export const SCHEMA_VERSION = 1;
 
 // Parents strictly before children (foreign-key safe application order).
+// `naturalKey` marks tables whose rows have an identity beyond their UUID —
+// it is both the merge-matching key and the ON CONFLICT target when applying.
 export const SYNCED_TABLES = [
   {
     name: 'subjects',
@@ -31,6 +45,7 @@ export const SYNCED_TABLES = [
   {
     name: 'grading_periods',
     columns: ['id', 'subject_id', 'type', 'created_at', 'updated_at', 'deleted_at'],
+    naturalKey: ['subject_id', 'type'],
   },
   {
     name: 'students',
@@ -47,10 +62,12 @@ export const SYNCED_TABLES = [
   {
     name: 'scores',
     columns: ['id', 'column_id', 'student_id', 'value', 'created_at', 'updated_at', 'deleted_at'],
+    naturalKey: ['column_id', 'student_id'],
   },
   {
     name: 'attendance_config',
     columns: ['id', 'period_id', 'present_score', 'late_score', 'absent_score', 'created_at', 'updated_at', 'deleted_at'],
+    naturalKey: ['period_id'],
   },
   {
     name: 'student_groups',
@@ -61,6 +78,12 @@ export const SYNCED_TABLES = [
     columns: ['id', 'group_id', 'last_name', 'first_name', 'middle_name', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
   },
 ];
+
+/** The identity key of one row within its table (natural key, else UUID). */
+export function rowKey(table, row) {
+  if (!table.naturalKey) return String(row.id);
+  return table.naturalKey.map(c => String(row[c])).join('|'); // UUIDs/types never contain '|'
+}
 
 /** Normalize a cell for comparison (null-ish unified; numbers as numbers). */
 function norm(v) {
@@ -98,27 +121,34 @@ export function pickWinner(localRow, peerRow, localDeviceId, peerDeviceId) {
 }
 
 /**
- * Merge one table. Returns the rows to insert and the rows to overwrite
- * locally. Never mutates inputs.
+ * Merge one table. Returns the rows to insert, the rows to overwrite locally,
+ * and the peer rows REJECTED by a differing local winner (`rejects` — applied
+ * nowhere, but the conflict log needs to know a competing version existed).
+ * Never mutates inputs.
  */
 export function mergeTable(table, localRows, peerRows, { localDeviceId, peerDeviceId }) {
-  const localById = new Map((localRows || []).map(r => [r.id, r]));
+  const localByKey = new Map((localRows || []).map(r => [rowKey(table, r), r]));
   const inserts = [];
   const updates = [];
+  const rejects = [];
   for (const peerRaw of peerRows || []) {
     if (!peerRaw || !peerRaw.id) continue; // malformed row: skip defensively
     const peerRow = pickColumns(peerRaw, table.columns);
-    const local = localById.get(peerRow.id);
+    const local = localByKey.get(rowKey(table, peerRow));
     if (!local) {
       inserts.push(peerRow);
       continue;
     }
     if (rowsEqual(local, peerRow, table.columns)) continue; // no-op
     if (pickWinner(local, peerRow, localDeviceId, peerDeviceId) === 'peer') {
+      // Whole row wins — id included, so independently-created twins converge
+      // to the winner's UUID on both devices.
       updates.push(peerRow);
+    } else {
+      rejects.push({ peer: peerRow, local });
     }
   }
-  return { inserts, updates };
+  return { inserts, updates, rejects };
 }
 
 /**

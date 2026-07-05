@@ -22,6 +22,8 @@ export default function SyncDialog({ open, onClose, onSynced }) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState(null); // { text, kind: 'ok' | 'error' }
+  const [conflicts, setConflicts] = useState([]);
+  const [showConflicts, setShowConflicts] = useState(false);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -31,6 +33,9 @@ export default function SyncDialog({ open, onClose, onSynced }) {
         setStatus(d);
         setFolder(d.sync_folder || '');
       }
+      const cRes = await fetch('/api/sync/conflicts');
+      const c = await cRes.json();
+      if (cRes.ok) setConflicts(c.conflicts || []);
     } catch {
       /* non-fatal */
     }
@@ -87,6 +92,7 @@ export default function SyncDialog({ open, onClose, onSynced }) {
       if (!res.ok) throw new Error(d.error || 'Sync failed');
       const merged = (d.imported || []).filter(r => r.status === 'merged');
       const applied = merged.reduce((s, r) => s + (r.applied || 0), 0);
+      const newConflicts = merged.reduce((s, r) => s + (r.conflicts_logged || 0), 0);
       const peersSeen = (d.imported || []).filter(r => ['merged', 'up-to-date'].includes(r.status)).length;
       const problems = (d.imported || []).filter(r => !['merged', 'up-to-date'].includes(r.status));
       let text = applied > 0
@@ -94,8 +100,12 @@ export default function SyncDialog({ open, onClose, onSynced }) {
         : peersSeen > 0
           ? 'Synced — already up to date.'
           : 'Snapshot exported. Waiting for the other laptop to sync.';
-      if (problems.length) text += ` (${problems.map(p => p.status).join(', ')})`;
-      setMessage({ text, kind: 'ok' });
+      if (newConflicts > 0) {
+        text += ` ${newConflicts} conflicting edit${newConflicts !== 1 ? 's' : ''} resolved (newest kept) — see the list below.`;
+        setShowConflicts(true);
+      }
+      if (problems.length) text += ` (${problems.map(p => p.error ? `${p.status}: ${p.error}` : p.status).join(', ')})`;
+      setMessage({ text, kind: newConflicts > 0 ? 'warn' : 'ok' });
       await loadStatus();
       if (applied > 0) onSynced?.();
     } catch (err) {
@@ -168,9 +178,55 @@ export default function SyncDialog({ open, onClose, onSynced }) {
           </div>
         )}
 
+        {/* Clock sanity: newest-wins needs both clocks to be roughly right. */}
+        {status?.peers?.some(p => p.clock_skew_minutes) && (
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            {status.peers.filter(p => p.clock_skew_minutes).map(p => (
+              <div key={p.device_id}>
+                ⚠️ <span className="font-medium">{p.label || 'The other laptop'}</span>&apos;s clock looks
+                about {p.clock_skew_minutes} min ahead. &quot;Newest edit wins&quot; can pick the wrong
+                version until its Windows clock is fixed (Settings → Time &amp; language → Sync now).
+              </div>
+            ))}
+          </div>
+        )}
+
         {message && (
-          <div className={`text-xs rounded-lg p-3 border ${message.kind === 'ok' ? 'text-green-700 bg-green-50 border-green-100' : 'text-red-600 bg-red-50 border-red-100'}`}>
+          <div className={`text-xs rounded-lg p-3 border ${
+            message.kind === 'ok' ? 'text-green-700 bg-green-50 border-green-100'
+            : message.kind === 'warn' ? 'text-amber-800 bg-amber-50 border-amber-200'
+            : 'text-red-600 bg-red-50 border-red-100'}`}
+          >
             {message.text}
+          </div>
+        )}
+
+        {/* Conflict audit: what newest-wins replaced on THIS laptop. */}
+        {conflicts.length > 0 && (
+          <div className="text-xs border border-gray-200 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setShowConflicts(v => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 text-gray-700 hover:bg-gray-50 rounded-lg"
+            >
+              <span className="font-medium">Resolved conflicts on this laptop ({conflicts.length})</span>
+              <span className="text-gray-400">{showConflicts ? '▴' : '▾'}</span>
+            </button>
+            {showConflicts && (
+              <div className="border-t border-gray-100 divide-y divide-gray-50 max-h-48 overflow-y-auto">
+                {conflicts.map(c => (
+                  <div key={c.id} className="px-3 py-2">
+                    <div className="font-medium text-gray-800">{c.label}</div>
+                    <div className="text-gray-600">
+                      kept <span className="font-semibold text-green-700">{c.kept}</span>
+                      <span className="text-gray-400"> ({c.kept_from}, {timeAgo(c.kept_at)})</span>
+                      {' · '}replaced <span className="font-semibold text-red-600">{c.discarded}</span>
+                      <span className="text-gray-400"> ({c.discarded_from}, {timeAgo(c.discarded_at)})</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

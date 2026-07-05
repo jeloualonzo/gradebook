@@ -27,6 +27,36 @@ app.setPath('userData', path.join(app.getPath('appData'), 'Gradebook'));
 let serverProc = null;
 let mainWindow = null;
 let logStream = null;
+let serverPort = null;
+let syncTimer = null;
+let syncInFlight = false;
+let quitSyncDone = false;
+
+const SYNC_INTERVAL_MS = 5 * 60 * 1000; // periodic push/pull while the app is open
+
+/**
+ * Ask the local server to run one sync pass. Resolves with the response body
+ * (or null on error/timeout) — NEVER rejects, so callers can fire-and-forget.
+ */
+function requestSync(timeoutMs = 15000, reason = 'periodic') {
+  return new Promise(resolve => {
+    if (!serverPort) return resolve(null);
+    if (syncInFlight) return resolve(null);
+    syncInFlight = true;
+    const done = (body) => { syncInFlight = false; resolve(body); };
+    const req = http.request(
+      { host: '127.0.0.1', port: serverPort, path: '/api/sync/run', method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      res => {
+        let body = '';
+        res.on('data', d => { body += d; });
+        res.on('end', () => { log(`Sync (${reason}, ${res.statusCode}): ${body.slice(0, 300)}`); done(body); });
+      }
+    );
+    req.setTimeout(timeoutMs, () => { log(`Sync (${reason}) timed out`); req.destroy(); done(null); });
+    req.on('error', err => { log(`Sync (${reason}) skipped: ${err.message}`); done(null); });
+    req.end('{}');
+  });
+}
 
 function fatal(message) {
   try {
@@ -124,18 +154,17 @@ async function start() {
     return result.canceled ? null : result.filePaths[0];
   });
 
-  // Fire-and-forget sync on launch (no-op until a sync folder is configured;
-  // failures only log — the gradebook never waits on sync).
-  const req = http.request(
-    { host: '127.0.0.1', port, path: '/api/sync/run', method: 'POST', headers: { 'Content-Type': 'application/json' } },
-    res => {
-      let body = '';
-      res.on('data', d => { body += d; });
-      res.on('end', () => log(`Launch sync (${res.statusCode}): ${body.slice(0, 300)}`));
-    }
-  );
-  req.on('error', err => log(`Launch sync skipped: ${err.message}`));
-  req.end('{}');
+  // Sync lifecycle (all no-ops until a sync folder is configured; failures
+  // only log — the gradebook never waits on sync):
+  //  · on launch:   pick up the other laptop's work before you start
+  //  · every 5 min: hand off changes while the app sits open (cheap — an
+  //                 unchanged database skips the export entirely)
+  //  · on quit:     publish today's work the moment you close the app
+  // Together these make "switch laptops whenever" safe: the laptop you leave
+  // has published, the one you open pulls first.
+  serverPort = port;
+  requestSync(15000, 'launch');
+  syncTimer = setInterval(() => requestSync(30000, 'periodic'), SYNC_INTERVAL_MS);
 
   // Internal navigation stays in-window; anything external opens in the browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -168,8 +197,19 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
+// Final sync on quit: hold the shutdown just long enough to publish this
+// session's work (bounded — a dead folder can only delay quitting ~6s).
+app.on('before-quit', (event) => {
+  if (quitSyncDone || !serverPort) return;
+  quitSyncDone = true;
+  event.preventDefault();
+  if (syncTimer) clearInterval(syncTimer);
+  requestSync(6000, 'quit').finally(() => app.quit());
+});
+
 app.on('quit', () => {
   app.isQuittingForReal = true;
+  if (syncTimer) clearInterval(syncTimer);
   try {
     serverProc?.kill();
   } catch {

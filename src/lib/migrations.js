@@ -25,13 +25,31 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const MIGRATIONS = {
-  // Example for a future feature:
-  // 2: (db) => {
-  //   db.exec(`ALTER TABLE subjects ADD COLUMN room TEXT`);
-  // },
+  // v2 — sync conflict audit log (local-only, never synced): every time a
+  // merge overwrites a row that THIS laptop changed since the last common
+  // state with that peer, the discarded version is recorded here. Nothing
+  // is ever lost silently.
+  2: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sync_conflicts (
+        id TEXT PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        row_key TEXT NOT NULL,
+        row_id TEXT,
+        peer_device_id TEXT,
+        winner TEXT NOT NULL,
+        winner_row TEXT NOT NULL,
+        loser_row TEXT NOT NULL,
+        winner_updated_at TEXT,
+        loser_updated_at TEXT,
+        resolved_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sync_conflicts_resolved ON sync_conflicts(resolved_at);
+    `);
+  },
 };
 
 /**

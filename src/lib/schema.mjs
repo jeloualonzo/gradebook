@@ -140,4 +140,22 @@ CREATE TABLE IF NOT EXISTS group_students (
   deleted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_group_students_group ON group_students(group_id);
+
+-- Sync conflict audit log (LOCAL-ONLY — never exported in snapshots).
+-- One row per merge decision that overwrote a value THIS laptop changed
+-- since the last common state with that peer (schema v2).
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+  id TEXT PRIMARY KEY,
+  table_name TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  row_id TEXT,
+  peer_device_id TEXT,
+  winner TEXT NOT NULL,        -- 'peer' or 'local': whose version was kept
+  winner_row TEXT NOT NULL,    -- JSON of the row that was kept
+  loser_row TEXT NOT NULL,     -- JSON of the row that was discarded
+  winner_updated_at TEXT,
+  loser_updated_at TEXT,
+  resolved_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_conflicts_resolved ON sync_conflicts(resolved_at);
 `;

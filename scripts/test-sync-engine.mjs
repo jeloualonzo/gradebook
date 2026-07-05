@@ -8,6 +8,7 @@ import {
   mergeSnapshots,
   pickWinner,
   rowsEqual,
+  rowKey,
   snapshotProblem,
   FORMAT_VERSION,
   SCHEMA_VERSION,
@@ -98,12 +99,14 @@ const subj = (over = {}) => ({
 // ---- 4. full-snapshot merge + idempotence + convergence ---------------------
 const emptyState = () => Object.fromEntries(SYNCED_TABLES.map(x => [x.name, []]));
 const applyDecisions = (state, decisions) => {
+  // Mirrors the real apply: rows land on their IDENTITY key (natural key
+  // where defined), so a winning twin REPLACES the local one it displaces.
   const next = structuredClone(state);
   for (const table of SYNCED_TABLES) {
     const d = decisions[table.name];
-    const byId = new Map(next[table.name].map(r => [r.id, r]));
-    for (const row of [...d.inserts, ...d.updates]) byId.set(row.id, row);
-    next[table.name] = [...byId.values()];
+    const byKey = new Map(next[table.name].map(r => [rowKey(table, r), r]));
+    for (const row of [...d.inserts, ...d.updates]) byKey.set(rowKey(table, row), row);
+    next[table.name] = [...byKey.values()];
   }
   return next;
 };
@@ -153,6 +156,56 @@ const applyDecisions = (state, decisions) => {
   t('malformed peer rows are skipped', d2.inserts.length === 0);
   t('winner comparison is symmetric-safe', pickWinner(subj(), subj(), A, B) === 'peer' && pickWinner(subj(), subj(), B, A) === 'local');
   t('rowsEqual treats null/undefined the same', rowsEqual({ id: '1', deleted_at: null }, { id: '1' }, ['id', 'deleted_at']));
+}
+
+// ---- 7. natural-key identity: independently created twins -------------------
+// Two devices fill the SAME empty score cell offline: each creates its own
+// row with its own UUID for one (column_id, student_id). These must merge as
+// an ordinary newest-wins conflict — never a UNIQUE-constraint crash.
+const SCORES = SYNCED_TABLES.find(x => x.name === 'scores');
+const cellRow = (over = {}) => ({
+  id: 'id-default', column_id: 'c1', student_id: 'st1', value: 5,
+  created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z',
+  deleted_at: null, ...over,
+});
+{
+  t('rowKey: scores use the natural cell key', rowKey(SCORES, cellRow()) === 'c1|st1');
+  t('rowKey: subjects use the UUID', rowKey(SUBJECTS, subj()) === 's1');
+
+  const mineOnA = cellRow({ id: 'id-a', value: 5, updated_at: '2026-07-01T10:00:00.000Z' });
+  const theirsOnB = cellRow({ id: 'id-b', value: 6, updated_at: '2026-07-01T11:00:00.000Z' }); // later
+  const dA = mergeTable(SCORES, [mineOnA], [theirsOnB], ctxOnA);
+  const dB = mergeTable(SCORES, [theirsOnB], [mineOnA], ctxOnB);
+  t('twins: later twin wins on the earlier device (as UPDATE, not insert)',
+    dA.inserts.length === 0 && dA.updates.length === 1 && dA.updates[0].value === 6 && dA.updates[0].id === 'id-b');
+  t('twins: later twin keeps its own on the later device', dB.inserts.length + dB.updates.length === 0);
+
+  const stateA = { ...emptyState(), scores: [mineOnA] };
+  const stateB = { ...emptyState(), scores: [theirsOnB] };
+  const mergedA = applyDecisions(stateA, mergeSnapshots(stateA, stateB, ctxOnA).decisions);
+  const mergedB = applyDecisions(stateB, mergeSnapshots(stateB, stateA, ctxOnB).decisions);
+  t('twins: ONE row per cell after merge (no duplicates)', mergedA.scores.length === 1 && mergedB.scores.length === 1);
+  t('twins: both devices converge to the same row, id included',
+    JSON.stringify(mergedA.scores[0]) === JSON.stringify(mergedB.scores[0]) && mergedA.scores[0].id === 'id-b');
+  t('twins: idempotent after convergence',
+    mergeSnapshots(mergedA, mergedB, ctxOnA).totals.applied === 0);
+}
+{
+  // Exact-timestamp twin tie: the device-id tiebreak must converge ids too.
+  const twinA = cellRow({ id: 'id-a', value: 5 });
+  const twinB = cellRow({ id: 'id-b', value: 6 });
+  const onA = mergeTable(SCORES, [twinA], [twinB], ctxOnA); // peer B has higher device id → wins
+  const onB = mergeTable(SCORES, [twinB], [twinA], ctxOnB); // peer A is lower → local wins
+  t('twin tie: higher device id wins on both sides',
+    onA.updates.length === 1 && onA.updates[0].id === 'id-b' && onB.updates.length === 0);
+}
+{
+  // Defense-in-depth: grading_periods twins (same subject+type) also converge.
+  const PERIODS = SYNCED_TABLES.find(x => x.name === 'grading_periods');
+  const pA = { id: 'p-a', subject_id: 's1', type: 'PRELIM', created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null };
+  const pB = { ...pA, id: 'p-b', updated_at: '2026-07-02T00:00:00.000Z' };
+  const d = mergeTable(PERIODS, [pA], [pB], ctxOnA);
+  t('period twins converge by (subject, type)', d.inserts.length === 0 && d.updates.length === 1 && d.updates[0].id === 'p-b');
 }
 
 console.log(failures === 0 ? '\nALL ENGINE TESTS PASSED' : `\n${failures} FAILURES`);
