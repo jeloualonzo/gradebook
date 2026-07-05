@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Toast from '@/components/Toast';
-import { todayLocalISO } from '@/lib/dateUtils';
+import { todayLocalISO, toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
 
 const STATUS_OPTIONS = [
   { key: 'P', label: 'Present', color: 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200', activeColor: 'bg-green-600 text-white border-green-600' },
@@ -31,19 +31,23 @@ function AttendanceContent() {
   const [date, setDate] = useState(todayLocalISO());
   const [statuses, setStatuses] = useState({});
   const [config, setConfig] = useState({ present_score: 10, late_score: 8, absent_score: 0 });
+  const [scores, setScores] = useState(null); // null until loaded
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
     async function load() {
-      const [periodsRes, studentsRes] = await Promise.all([
+      const [periodsRes, studentsRes, scoresRes] = await Promise.all([
         fetch(`/api/subjects/${id}/periods`),
         fetch(`/api/subjects/${id}/students`),
+        fetch(`/api/subjects/${id}/scores`),
       ]);
       const periodsData = await periodsRes.json();
       const studentsData = await studentsRes.json();
+      const scoresData = await scoresRes.json();
       setPeriods(periodsData);
       setStudents(studentsData);
+      setScores(scoresData && typeof scoresData === 'object' ? scoresData : {});
       // Default to the first period without re-running this effect on change.
       setSelectedPeriodId(prev => prev || (periodsData.length > 0 ? String(periodsData[0].id) : ''));
     }
@@ -56,24 +60,50 @@ function AttendanceContent() {
   );
 
   // Derived — no state/effect needed.
-  const attendanceAssessmentId = useMemo(() => {
-    const att = selectedPeriod?.assessments?.find(a => a.name.toLowerCase() === 'attendance');
-    return att?.id || null;
-  }, [selectedPeriod]);
+  const attendanceAssessment = useMemo(
+    () => selectedPeriod?.assessments?.find(a => a.name.toLowerCase() === 'attendance') || null,
+    [selectedPeriod]
+  );
+  const attendanceAssessmentId = attendanceAssessment?.id || null;
 
-  // Sync editable config + reset statuses when the period (or its saved
-  // config) changes — render-time adjustment per React docs.
-  const [prevPeriodKey, setPrevPeriodKey] = useState(null);
-  const periodKey = selectedPeriod ? `${selectedPeriod.id}` : null;
-  if (periodKey !== prevPeriodKey) {
-    setPrevPeriodKey(periodKey);
-    setStatuses({});
-    if (selectedPeriod?.attendanceConfig) {
+  // The existing Attendance column matching the picked date, if there is one.
+  // When it exists, saving EDITS it instead of creating a duplicate column.
+  const existingColumn = useMemo(() => {
+    if (!attendanceAssessment || !date) return null;
+    return (attendanceAssessment.columns || []).find(c => toDateInputValue(c.date) === date) || null;
+  }, [attendanceAssessment, date]);
+
+  // Sync editable config on period change, and (re)load recorded statuses
+  // whenever the period/date/column combination changes — render-time
+  // adjustment per React docs.
+  const deriveKey = `${selectedPeriodId}|${date}|${existingColumn?.id ?? 'new'}|${scores ? 1 : 0}`;
+  const [prevDeriveKey, setPrevDeriveKey] = useState(null);
+  if (deriveKey !== prevDeriveKey) {
+    const prevPeriodPart = prevDeriveKey ? prevDeriveKey.split('|')[0] : null;
+    setPrevDeriveKey(deriveKey);
+    if (prevPeriodPart !== String(selectedPeriodId) && selectedPeriod?.attendanceConfig) {
       setConfig({
         present_score: selectedPeriod.attendanceConfig.present_score,
         late_score: selectedPeriod.attendanceConfig.late_score,
         absent_score: selectedPeriod.attendanceConfig.absent_score,
       });
+    }
+    if (existingColumn && scores) {
+      // Load the recorded attendance for this date so it can be edited.
+      const cfg = selectedPeriod?.attendanceConfig || config;
+      const colScores = scores[existingColumn.id] || {};
+      const loaded = {};
+      for (const s of students) {
+        const v = colScores[s.id];
+        if (v === undefined || v === null) continue;
+        const n = parseFloat(v);
+        if (n === parseFloat(cfg.present_score)) loaded[s.id] = 'P';
+        else if (n === parseFloat(cfg.late_score)) loaded[s.id] = 'L';
+        else if (n === parseFloat(cfg.absent_score)) loaded[s.id] = 'A';
+      }
+      setStatuses(loaded);
+    } else {
+      setStatuses({});
     }
   }
 
@@ -103,30 +133,59 @@ function AttendanceContent() {
       setToast({ msg: 'No Attendance assessment found in this period.', type: 'error', k: Date.now() });
       return;
     }
+    if (!date) {
+      setToast({ msg: 'Pick a date first.', type: 'error', k: Date.now() });
+      return;
+    }
     setSaving(true);
+    try {
+      // Reuse the existing column for this date, or create it if the date is
+      // new. Duplicate columns for the same date can never be created.
+      let columnId = existingColumn?.id;
+      if (!columnId) {
+        const colRes = await fetch(`/api/assessments/${attendanceAssessmentId}/columns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, max_score: config.present_score, dedupe_by_date: true }),
+        });
+        const colJson = await colRes.json().catch(() => ({}));
+        if (!colRes.ok || !colJson?.id) throw new Error(colJson?.error || 'Could not create the attendance column.');
+        columnId = colJson.id;
+      } else {
+        // Keep the existing column's max score in sync with the Present score.
+        await fetch(`/api/columns/${columnId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ max_score: config.present_score }),
+        });
+      }
 
-    const colRes = await fetch(`/api/assessments/${attendanceAssessmentId}/columns`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date, max_score: config.present_score }),
-    });
-    const { id: columnId } = await colRes.json();
+      const scoreMap = { P: config.present_score, L: config.late_score, A: config.absent_score };
+      const entries = students.map(s => ({
+        student_id: s.id,
+        value: statuses[s.id] ? scoreMap[statuses[s.id]] : null,
+      }));
 
-    const scoreMap = { P: config.present_score, L: config.late_score, A: config.absent_score };
-    const entries = students.map(s => ({
-      student_id: s.id,
-      value: statuses[s.id] ? scoreMap[statuses[s.id]] : null,
-    }));
+      const saveRes = await fetch(`/api/attendance/${selectedPeriodId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ columnId, entries }),
+      });
+      if (!saveRes.ok) throw new Error('Could not save attendance.');
 
-    await fetch(`/api/attendance/${selectedPeriodId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ columnId, entries }),
-    });
-
-    setSaving(false);
-    setToast({ msg: 'Attendance saved to gradebook', type: 'success', k: Date.now() });
-    setTimeout(() => router.push(`/subjects/${id}`), 1200);
+      setToast({
+        msg: existingColumn
+          ? `Attendance for ${formatDateMMDDYYYY(date)} updated`
+          : `Attendance for ${formatDateMMDDYYYY(date)} saved to gradebook`,
+        type: 'success',
+        k: Date.now(),
+      });
+      setTimeout(() => router.push(`/subjects/${id}`), 1200);
+    } catch (err) {
+      setToast({ msg: err.message, type: 'error', k: Date.now() });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const presentCount = Object.values(statuses).filter(s => s === 'P').length;
@@ -168,6 +227,11 @@ function AttendanceContent() {
                 value={date}
                 onChange={e => setDate(e.target.value)}
               />
+              <p className={`text-[11px] mt-1 ${existingColumn ? 'text-blue-600' : 'text-gray-400'}`}>
+                {existingColumn
+                  ? `Attendance for ${formatDateMMDDYYYY(date)} already exists — you're editing it.`
+                  : 'A new attendance column will be created for this date.'}
+              </p>
             </div>
           </div>
 
@@ -247,7 +311,7 @@ function AttendanceContent() {
             disabled={saving}
             className="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
-            {saving ? 'Saving…' : 'Save Attendance'}
+            {saving ? 'Saving…' : existingColumn ? 'Update Attendance' : 'Save Attendance'}
           </button>
         </div>
       </main>
