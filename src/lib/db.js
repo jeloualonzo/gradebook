@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { runMigrations } from './migrations';
 
 /**
  * SQLite storage engine — zero configuration by design.
@@ -15,8 +16,6 @@ import crypto from 'crypto';
  *   a friendly label). It lives NEXT TO the database on purpose: identity
  *   belongs to the installation, not inside the synced data.
  */
-
-const SCHEMA_VERSION = 1;
 
 const dataDir = process.env.GRADEBOOK_DATA_DIR || path.join(process.cwd(), 'data');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -34,9 +33,9 @@ const schemaPath =
   process.env.GRADEBOOK_SCHEMA_PATH ||
   path.join(/* turbopackIgnore: true */ process.cwd(), 'src/lib/schema.sql');
 db.exec(fs.readFileSync(schemaPath, 'utf8'));
-if (db.pragma('user_version', { simple: true }) < SCHEMA_VERSION) {
-  db.pragma(`user_version = ${SCHEMA_VERSION}`);
-}
+// Upgrade older databases in place (see src/lib/migrations.js) — this is
+// what makes app updates safe over real data.
+runMigrations(db);
 
 // ---- Device identity (no accounts — one generated id per installation) ----
 const devicePath = path.join(dataDir, 'device.json');
