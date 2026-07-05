@@ -26,8 +26,10 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.pragma('busy_timeout = 5000');
 
-// Bootstrap / upgrade schema.
-const schemaPath = path.join(process.cwd(), 'src/lib/schema.sql');
+// Bootstrap / upgrade schema. In the packaged desktop app the schema file
+// lives next to the bundled server, located via GRADEBOOK_SCHEMA_PATH.
+const schemaPath =
+  process.env.GRADEBOOK_SCHEMA_PATH || path.join(process.cwd(), 'src/lib/schema.sql');
 db.exec(fs.readFileSync(schemaPath, 'utf8'));
 if (db.pragma('user_version', { simple: true }) < SCHEMA_VERSION) {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -81,6 +83,12 @@ const api = {
     return device.device_id;
   },
   getDeviceLabel() {
+    return device.device_label;
+  },
+  /** Set the friendly label for this installation (first-run prompt). */
+  setDeviceLabel(label) {
+    device.device_label = String(label || '').trim() || null;
+    fs.writeFileSync(devicePath, JSON.stringify(device, null, 2));
     return device.device_label;
   },
   /** Paths, for backups/diagnostics (used by later phases). */

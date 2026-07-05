@@ -13,6 +13,10 @@ export default function HomePage() {
   const [editTarget, setEditTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  // First-run: this installation has no friendly name yet ("Jelou's laptop").
+  const [needsDeviceName, setNeedsDeviceName] = useState(false);
+  const [deviceName, setDeviceName] = useState('');
+  const [savingDevice, setSavingDevice] = useState(false);
 
   const showToast = useCallback(
     (message, type = 'success') => setToast({ message, type, key: Date.now() }),
@@ -38,6 +42,40 @@ export default function HomePage() {
   useEffect(() => {
     (async () => { await fetchSubjects(); })();
   }, [fetchSubjects]);
+
+  // One question, once ever: what should this laptop be called?
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/device');
+        const d = await res.json();
+        if (res.ok && !d.device_label) setNeedsDeviceName(true);
+      } catch {
+        /* non-fatal */
+      }
+    })();
+  }, []);
+
+  const handleSaveDeviceName = async (e) => {
+    e.preventDefault();
+    const name = deviceName.trim();
+    if (!name) return;
+    setSavingDevice(true);
+    try {
+      const res = await fetch('/api/device', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_label: name }),
+      });
+      if (!res.ok) throw new Error('Could not save the name');
+      setNeedsDeviceName(false);
+      showToast(`This laptop is now "${name}"`);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSavingDevice(false);
+    }
+  };
 
   const handleAdd = async (form) => {
     setSaving(true);
@@ -147,6 +185,43 @@ export default function HomePage() {
           </>
         )}
       </main>
+
+      <Modal
+        open={needsDeviceName}
+        onClose={() => setNeedsDeviceName(false)}
+        title="Name this laptop"
+        width="max-w-sm"
+      >
+        <form onSubmit={handleSaveDeviceName} className="space-y-3">
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Give this installation a friendly name (e.g. <span className="font-medium text-gray-700">Jelou&apos;s laptop</span>).
+            It identifies which laptop created each subject — it&apos;s not an account and there&apos;s nothing to log into.
+          </p>
+          <input
+            autoFocus
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="e.g. Jelou's laptop"
+            value={deviceName}
+            onChange={e => setDeviceName(e.target.value)}
+          />
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setNeedsDeviceName(false)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Later
+            </button>
+            <button
+              type="submit"
+              disabled={savingDevice || !deviceName.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {savingDevice ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="New Subject">
         <SubjectForm
