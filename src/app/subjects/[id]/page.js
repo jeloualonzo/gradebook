@@ -6,6 +6,7 @@ import { useGradebook } from '@/lib/hooks/useGradebook';
 import { useHistory } from '@/lib/hooks/useHistory';
 import GradebookTable from '@/components/GradebookTable';
 import StudentManager from '@/components/StudentManager';
+import ImportStudentsDialog from '@/components/ImportStudentsDialog';
 import Modal from '@/components/Modal';
 import Toast from '@/components/Toast';
 
@@ -20,6 +21,7 @@ export default function GradebookPage() {
   } = useGradebook(id);
 
   const [studentsOpen, setStudentsOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = (msg, type = 'success') => setToast({ msg, type, k: Date.now() });
 
@@ -89,6 +91,17 @@ export default function GradebookPage() {
           </div>
 
           <button
+            onClick={() => setImportOpen(true)}
+            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
+            title="Copy students from a Student Group"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Import Students
+          </button>
+
+          <button
             onClick={() => setStudentsOpen(true)}
             className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
           >
@@ -155,6 +168,20 @@ export default function GradebookPage() {
           onRefresh={() => { refreshStudents(); refreshScores(); }}
         />
       </Modal>
+
+      <ImportStudentsDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        subjectId={id}
+        onImported={({ imported, skipped }) => {
+          showToast(
+            `Imported ${imported} student${imported !== 1 ? 's' : ''}` +
+            (skipped ? ` (${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped)` : '')
+          );
+          refreshStudents();
+          refreshScores();
+        }}
+      />
 
       {toast && (
         <Toast key={toast.k} message={toast.msg} type={toast.type} onDone={() => setToast(null)} />

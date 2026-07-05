@@ -42,6 +42,25 @@ function NewSubjectContent() {
   const [weightError, setWeightError] = useState('');
   const [createdId, setCreatedId] = useState(subjectId || null);
 
+  // Student Source: start empty, or copy students from a Student Group.
+  const [groups, setGroups] = useState([]);
+  const [studentSource, setStudentSource] = useState('empty'); // 'empty' | 'group'
+  const [groupId, setGroupId] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/groups');
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : [];
+        setGroups(list);
+        setGroupId(prev => prev || (list[0] ? String(list[0].id) : ''));
+      } catch {
+        setGroups([]);
+      }
+    })();
+  }, []);
+
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   const totalPW = Number(form.prelim_weight) + Number(form.midterm_weight) + Number(form.final_weight);
 
@@ -57,6 +76,14 @@ function NewSubjectContent() {
       body: JSON.stringify(form),
     });
     const { id } = await res.json();
+    // One-time copy of the selected group's students into the new subject.
+    if (studentSource === 'group' && groupId) {
+      await fetch(`/api/subjects/${id}/import-students`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId: Number(groupId), skipDuplicates: false }),
+      });
+    }
     setCreatedId(id);
     setSaving(false);
     setStep(2);
@@ -165,6 +192,50 @@ function NewSubjectContent() {
                 ))}
               </div>
               {weightError && <p className="text-xs text-red-500 mt-1.5">{weightError}</p>}
+            </div>
+
+            <div className="border-t border-gray-100 pt-4">
+              <p className="text-xs font-medium text-gray-700 mb-3">Student Source</p>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="studentSource"
+                    className="w-3.5 h-3.5 text-blue-600"
+                    checked={studentSource === 'empty'}
+                    onChange={() => setStudentSource('empty')}
+                  />
+                  Start with an empty student list
+                </label>
+                <label className={`flex items-center gap-2 text-sm cursor-pointer ${groups.length === 0 ? 'text-gray-400' : 'text-gray-800'}`}>
+                  <input
+                    type="radio"
+                    name="studentSource"
+                    className="w-3.5 h-3.5 text-blue-600"
+                    checked={studentSource === 'group'}
+                    disabled={groups.length === 0}
+                    onChange={() => setStudentSource('group')}
+                  />
+                  Import from Student Group
+                  {groups.length === 0 && <span className="text-xs text-gray-400">(no groups created yet)</span>}
+                </label>
+              </div>
+
+              {studentSource === 'group' && groups.length > 0 && (
+                <div className="mt-3">
+                  <label className={labelClass}>Student Group</label>
+                  <select className={inputClass} value={groupId} onChange={e => setGroupId(e.target.value)}>
+                    {groups.map(g => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({Number(g.student_count) || 0} student{(Number(g.student_count) || 0) !== 1 ? 's' : ''})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1.5">
+                    Students are copied into this subject. Later changes to the group won&apos;t affect it.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end pt-2">
