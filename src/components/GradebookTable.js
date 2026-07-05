@@ -118,23 +118,29 @@ export default function GradebookTable({ subject, periods, students, scores, onU
             </th>
           </tr>
 
-          {/* Row 2: Assessment Names */}
+          {/* Row 2: Assessment Names (the per-period "Grade" header spans rows 2-4) */}
           <tr>
             {periods.map(period => {
               const colors = PERIOD_COLORS[period.type];
-              return period.assessments.map(a => (
-                <AssessmentBlock
-                  key={a.id}
-                  assessment={a}
-                  periodId={period.id}
-                  colors={colors}
-                  mode="header-name"
-                  onRefresh={onRefreshPeriods}
-                />
-              )).concat(
-                <th key={`${period.id}-grade`} className={`${colors.light} ${colors.text} text-center font-semibold px-2 py-1.5`}>
-                  Grade
-                </th>
+              return (
+                <React.Fragment key={period.id}>
+                  {period.assessments.map(a => (
+                    <AssessmentBlock
+                      key={a.id}
+                      assessment={a}
+                      periodId={period.id}
+                      colors={colors}
+                      mode="header-name"
+                      onRefresh={onRefreshPeriods}
+                    />
+                  ))}
+                  <th
+                    rowSpan={3}
+                    className={`${colors.light} ${colors.text} text-center font-semibold px-2 py-1.5`}
+                  >
+                    Grade
+                  </th>
+                </React.Fragment>
               );
             })}
           </tr>
@@ -143,16 +149,19 @@ export default function GradebookTable({ subject, periods, students, scores, onU
           <tr>
             {periods.map(period => {
               const colors = PERIOD_COLORS[period.type];
-              return period.assessments.map(a => (
-                <AssessmentBlock
-                  key={a.id}
-                  assessment={a}
-                  periodId={period.id}
-                  colors={colors}
-                  mode="header-dates"
-                  onRefresh={onRefreshPeriods}
-                />
-              )).concat(
+              return (
+                <React.Fragment key={period.id}>
+                  {period.assessments.map(a => (
+                    <AssessmentBlock
+                      key={a.id}
+                      assessment={a}
+                      periodId={period.id}
+                      colors={colors}
+                      mode="header-dates"
+                      onRefresh={onRefreshPeriods}
+                    />
+                  ))}
+                </React.Fragment>
               );
             })}
           </tr>
@@ -161,16 +170,19 @@ export default function GradebookTable({ subject, periods, students, scores, onU
           <tr>
             {periods.map(period => {
               const colors = PERIOD_COLORS[period.type];
-              return period.assessments.map(a => (
-                <AssessmentBlock
-                  key={a.id}
-                  assessment={a}
-                  periodId={period.id}
-                  colors={colors}
-                  mode="header-max-scores"
-                  onRefresh={onRefreshPeriods}
-                />
-              )).concat(
+              return (
+                <React.Fragment key={period.id}>
+                  {period.assessments.map(a => (
+                    <AssessmentBlock
+                      key={a.id}
+                      assessment={a}
+                      periodId={period.id}
+                      colors={colors}
+                      mode="header-max-scores"
+                      onRefresh={onRefreshPeriods}
+                    />
+                  ))}
+                </React.Fragment>
               );
             })}
           </tr>
@@ -198,17 +210,23 @@ export default function GradebookTable({ subject, periods, students, scores, onU
                   return (
                     <React.Fragment key={period.id}>
                       {period.assessments.map(a =>
-                        a.columns.map(col => (
-                          <td key={col.id} className="p-0 border-r border-gray-100">
-                            <ScoreCell
-                              columnId={col.id}
-                              studentId={student.id}
-                              initialValue={scores?.[col.id]?.[student.id]}
-                              maxScore={col.max_score}
-                              onUpdate={onUpdateScore}
-                            />
-                          </td>
-                        ))
+                        a.columns.length > 0 ? (
+                          a.columns.map(col => (
+                            <td key={col.id} className="p-0 border-r border-gray-100">
+                              <ScoreCell
+                                columnId={col.id}
+                                studentId={student.id}
+                                initialValue={scores?.[col.id]?.[student.id]}
+                                maxScore={col.max_score}
+                                onUpdate={onUpdateScore}
+                              />
+                            </td>
+                          ))
+                        ) : (
+                          // Placeholder cell so body rows stay aligned with the
+                          // header placeholder of assessments that have no columns yet.
+                          <td key={`${a.id}-empty`} className="p-0 border-r border-gray-100 bg-gray-50/60" />
+                        )
                       )}
                       <td key={`${period.id}-grade-${student.id}`} className={`grade-col ${colors.light} ${colors.text} text-center px-2 py-1 border-r-2 border-gray-300`}>
                         {formatGrade(periodGrades[period.type])}
