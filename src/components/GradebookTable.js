@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import React from 'react';
 import ScoreCell from './ScoreCell';
+import ContextMenu from './ContextMenu';
 import { formatGrade, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import AssessmentBlock from './AssessmentBlock';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -17,7 +18,9 @@ import {
 const PERIOD_COLORS = {
   PRELIM: { header: 'bg-blue-700', light: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700' },
   MIDTERM: { header: 'bg-green-700', light: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
-  FINAL: { header: 'bg-orange-700', light: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
+  // Purple (not red/orange) — red implies errors; purple stays distinct from
+  // the blue/green periods while reading as "final".
+  FINAL: { header: 'bg-purple-700', light: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700' },
 };
 
 const STICKY_NO = 'sticky-col';
@@ -38,10 +41,20 @@ export default function GradebookTable({
   getPeriodOrder,
   onHistoryPush,
   onSaveError,
+  onEditStudent,
+  onDeleteStudent,
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
   const [newAssessmentName, setNewAssessmentName] = useState('');
+
+  // One context menu for the whole grid (portaled to <body>).
+  const [menu, setMenu] = useState(null);
+  const openMenu = useCallback((event, items) => {
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY, items });
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   const handleAddAssessment = async (periodId) => {
     const name = newAssessmentName.trim();
@@ -174,19 +187,14 @@ export default function GradebookTable({
                 <th
                   key={period.id}
                   colSpan={colSpan}
+                  onContextMenu={e => openMenu(e, [
+                    { label: 'Add assessment…', onClick: () => setAddingAssessment(period.id) },
+                  ])}
+                  title="Right-click for actions"
                   className={`${colors.header} text-white text-center py-1.5 px-3 font-semibold tracking-wide text-xs uppercase`}
                 >
                   <div className="flex items-center justify-center gap-2">
                     {period.type}
-                    <button
-                      onClick={() => setAddingAssessment(period.id)}
-                      className="text-white/70 hover:text-white transition-colors"
-                      title="Add assessment"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                    </button>
                   </div>
                   {addingAssessment === period.id && (
                     <div className="flex items-center gap-1 mt-1 justify-center">
@@ -246,6 +254,7 @@ export default function GradebookTable({
                         getPeriodOrder={getPeriodOrder}
                         onHistoryPush={onHistoryPush}
                         onSaveError={onSaveError}
+                        onOpenMenu={openMenu}
                       />
                     ))}
                   </SortableContext>
@@ -281,6 +290,7 @@ export default function GradebookTable({
                       getPeriodOrder={getPeriodOrder}
                       onHistoryPush={onHistoryPush}
                       onSaveError={onSaveError}
+                      onOpenMenu={openMenu}
                     />
                   ))}
                 </React.Fragment>
@@ -309,6 +319,7 @@ export default function GradebookTable({
                       getPeriodOrder={getPeriodOrder}
                       onHistoryPush={onHistoryPush}
                       onSaveError={onSaveError}
+                      onOpenMenu={openMenu}
                     />
                   ))}
                 </React.Fragment>
@@ -329,7 +340,14 @@ export default function GradebookTable({
             return (
               <tr key={student.id} className="hover:bg-gray-50/50">
                 <td className={`${STICKY_NO} bg-white text-center text-gray-400 py-1`}>{idx + 1}</td>
-                <td className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800 truncate max-w-[180px]`}>
+                <td
+                  className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800 truncate max-w-[180px]`}
+                  onContextMenu={e => openMenu(e, [
+                    { label: 'Edit student…', onClick: () => onEditStudent?.(student) },
+                    { label: 'Delete student…', danger: true, separatorBefore: true, onClick: () => onDeleteStudent?.(student) },
+                  ])}
+                  title="Right-click for actions"
+                >
                   {student.last_name}, {student.first_name}
                   {student.middle_name ? ` ${student.middle_name.charAt(0)}.` : ''}
                 </td>
@@ -375,6 +393,7 @@ export default function GradebookTable({
         </tbody>
       </table>
     </div>
+    <ContextMenu menu={menu} onClose={closeMenu} />
     </DndContext>
   );
 }

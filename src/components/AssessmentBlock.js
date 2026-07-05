@@ -10,7 +10,7 @@ import { CSS } from '@dnd-kit/utilities';
  * Sortable <th> wrapper for the assessment name header cell. Dragging this
  * block reorders the assessment within its own grading period.
  */
-function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, children }) {
+function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, onContextMenu, children }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
     data: { periodId },
@@ -24,6 +24,7 @@ function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, ch
       ref={setNodeRef}
       colSpan={colSpan}
       style={style}
+      onContextMenu={onContextMenu}
       className={`${className} ${isDragging ? 'opacity-60 ring-2 ring-blue-400 relative z-30' : dragDisabled ? '' : 'cursor-grab active:cursor-grabbing'}`}
       {...attributes}
       {...(dragDisabled ? {} : listeners)}
@@ -46,6 +47,7 @@ function AssessmentBlock({
   getPeriodOrder,
   onHistoryPush,
   onSaveError,
+  onOpenMenu,
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
@@ -363,6 +365,14 @@ function AssessmentBlock({
     }
   };
 
+  // Right-click menu for the assessment header — replaces the old +/trash icons.
+  const assessmentMenuItems = () => [
+    !assessment.is_exam && { label: 'Add date column', onClick: addColumn },
+    !assessment.is_exam && { label: 'Rename assessment…', onClick: () => setEditingName(true) },
+    { label: 'Edit weight…', onClick: () => setEditingWeight(true) },
+    { label: 'Delete assessment…', danger: true, separatorBefore: true, onClick: () => setConfirmDelete(true) },
+  ];
+
   if (mode === 'header-name') {
     return (
       <SortableHeaderCell
@@ -371,6 +381,7 @@ function AssessmentBlock({
         colSpan={colSpan}
         // The Exam is permanently the last assessment — it cannot be dragged.
         dragDisabled={!!assessment.is_exam || editingName || editingWeight || confirmDelete}
+        onContextMenu={e => onOpenMenu?.(e, assessmentMenuItems())}
         className={`${colors.light} border-r border-b border-gray-200 text-center px-2 py-1.5`}
       >
         <div className="flex items-center justify-center gap-1">
@@ -422,27 +433,6 @@ function AssessmentBlock({
             </button>
           )}
 
-          {!assessment.is_exam && (
-            <button
-              onClick={addColumn}
-              title="Add date column"
-              className="ml-1 text-gray-300 hover:text-blue-600 transition-colors"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </button>
-          )}
-
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="text-gray-200 hover:text-red-500 transition-colors"
-            title="Delete assessment"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-            </svg>
-          </button>
         </div>
 
 
@@ -457,10 +447,33 @@ function AssessmentBlock({
     );
   }
 
+  // Right-click menu for one date column. "Edit max score" focuses the max
+  // input in the row below (located via its data attribute).
+  const columnMenuItems = (col) => [
+    { label: 'Edit date…', onClick: () => setEditingDate(col.id) },
+    {
+      label: 'Edit max score…',
+      onClick: () => {
+        const input = document.querySelector(`input[data-max-for="${col.id}"]`);
+        if (input) { input.focus(); input.select?.(); }
+      },
+    },
+    // The exam always keeps exactly one date column — no delete for it.
+    !assessment.is_exam && {
+      label: 'Delete date column…',
+      danger: true,
+      separatorBefore: true,
+      onClick: () => handleDeleteColumn(col.id),
+    },
+  ];
+
   if (mode === 'header-dates') {
     if (assessment.columns.length === 0) {
       return (
-        <th className="relative border-r border-gray-200 px-1 py-0.5 text-center">
+        <th
+          className="relative border-r border-gray-200 px-1 py-0.5 text-center"
+          onContextMenu={e => onOpenMenu?.(e, [{ label: 'Set date…', onClick: () => setAddingDate(true) }])}
+        >
           <span
             className="block text-[9px] text-gray-300 cursor-pointer hover:text-blue-600 py-0.5"
             title="Set date"
@@ -501,7 +514,11 @@ function AssessmentBlock({
     return (
       <>
         {assessment.columns.map(col => (
-          <th key={col.id} className="group relative border-r border-gray-200 px-1 py-0.5 text-center">
+          <th
+            key={col.id}
+            className="relative border-r border-gray-200 px-1 py-0.5 text-center"
+            onContextMenu={e => onOpenMenu?.(e, columnMenuItems(col))}
+          >
             <span
               className="block text-[9px] cursor-pointer hover:text-blue-600 py-0.5 truncate"
               onClick={() => setEditingDate(col.id)}
@@ -529,17 +546,6 @@ function AssessmentBlock({
                 }}
               />
             )}
-            {!assessment.is_exam && (
-              <button
-                onClick={() => handleDeleteColumn(col.id)}
-                className="absolute right-0 top-1/2 -translate-y-1/2 hidden group-hover:block bg-white/95 rounded-sm p-0.5 text-gray-300 hover:text-red-500 transition-colors"
-                title="Remove column"
-              >
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                </svg>
-              </button>
-            )}
           </th>
         ))}
         <ConfirmDialog
@@ -565,7 +571,11 @@ function AssessmentBlock({
     return (
       <>
         {assessment.columns.map(col => (
-          <th key={col.id} className="border-r border-gray-200 px-1 py-0.5 text-center">
+          <th
+            key={col.id}
+            className="border-r border-gray-200 px-1 py-0.5 text-center"
+            onContextMenu={e => onOpenMenu?.(e, columnMenuItems(col))}
+          >
             <input
               // Remount when the stored value changes (rollback / undo / redo)
               // so this uncontrolled input always shows the current value.

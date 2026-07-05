@@ -6,7 +6,9 @@ import { useGradebook } from '@/lib/hooks/useGradebook';
 import { useHistory } from '@/lib/hooks/useHistory';
 import GradebookTable from '@/components/GradebookTable';
 import StudentManager from '@/components/StudentManager';
+import StudentForm from '@/components/StudentForm';
 import ImportStudentsDialog from '@/components/ImportStudentsDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import Modal from '@/components/Modal';
 import Toast from '@/components/Toast';
 
@@ -22,6 +24,10 @@ export default function GradebookPage() {
 
   const [studentsOpen, setStudentsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  // Right-click actions on a student row in the grid.
+  const [editStudentTarget, setEditStudentTarget] = useState(null);
+  const [deleteStudentTarget, setDeleteStudentTarget] = useState(null);
+  const [savingStudent, setSavingStudent] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg, type = 'success') => setToast({ msg, type, k: Date.now() }), []);
 
@@ -37,6 +43,39 @@ export default function GradebookPage() {
   useEffect(() => { scoresRef.current = scores; }, [scores]);
   useEffect(() => { periodsRef.current = periods; }, [periods]);
   const getScores = useCallback(() => scoresRef.current, []);
+
+  const handleStudentEditSave = async (form) => {
+    setSavingStudent(true);
+    try {
+      const res = await fetch(`/api/students/${editStudentTarget.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error('Could not save the student.');
+      setEditStudentTarget(null);
+      showToast('Student updated');
+      refreshStudents();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSavingStudent(false);
+    }
+  };
+
+  const handleStudentDelete = async () => {
+    const target = deleteStudentTarget;
+    setDeleteStudentTarget(null);
+    if (!target) return;
+    const res = await fetch(`/api/students/${target.id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast(`${target.last_name}, ${target.first_name} removed`);
+      refreshStudents();
+      refreshScores();
+    } else {
+      showToast('Could not delete the student.', 'error');
+    }
+  };
   const getPeriodOrder = useCallback((periodId) => {
     const p = periodsRef.current.find(x => x.id === periodId);
     return (p?.assessments || []).map(a => a.id);
@@ -176,6 +215,8 @@ export default function GradebookPage() {
           getPeriodOrder={getPeriodOrder}
           onHistoryPush={history.push}
           onSaveError={handleSaveError}
+          onEditStudent={setEditStudentTarget}
+          onDeleteStudent={setDeleteStudentTarget}
         />
       </div>
 
@@ -186,6 +227,25 @@ export default function GradebookPage() {
           onRefresh={() => { refreshStudents(); refreshScores(); }}
         />
       </Modal>
+
+      <Modal open={!!editStudentTarget} onClose={() => setEditStudentTarget(null)} title="Edit Student" width="max-w-sm">
+        {editStudentTarget && (
+          <StudentForm
+            initial={editStudentTarget}
+            onSubmit={handleStudentEditSave}
+            onCancel={() => setEditStudentTarget(null)}
+            loading={savingStudent}
+          />
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteStudentTarget}
+        onClose={() => setDeleteStudentTarget(null)}
+        onConfirm={handleStudentDelete}
+        title="Remove Student"
+        message={deleteStudentTarget ? `Remove ${deleteStudentTarget.last_name}, ${deleteStudentTarget.first_name}? Their scores will be deleted.` : ''}
+      />
 
       <ImportStudentsDialog
         open={importOpen}
