@@ -52,7 +52,36 @@ Student Groups accept `.xlsx` / `.xls` rosters with exactly three columns —
 **First Name, Middle Name, Last Name** (case-insensitive headers). Blank rows are
 ignored, values are trimmed, and duplicates (same full name) are skipped automatically.
 
+## Desktop app (Windows)
+
+The gradebook ships as an Electron desktop app — double-click to open, no Node,
+no terminal, no configuration. Build the installer **on Windows**:
+
+```bash
+npm install
+npm run desktop:build     # → dist/Gradebook-Setup-<version>.exe
+```
+
+Install it, open **Gradebook**, and on first run it asks one question — what to
+call this laptop (e.g. "Jelou's laptop"). That's the whole setup.
+
+In desktop mode your data lives in the Windows app-data folder
+(`%APPDATA%/Gradebook/`):
+
+| Location | Purpose |
+|---|---|
+| `data/gradebook.sqlite` | The database |
+| `data/device.json` | This laptop's identity |
+| `backups/<timestamp>/` | Automatic backups made at every launch (newest 14 kept) |
+| `logs/server.log` | Diagnostics if something won't start |
+
+Notes:
+- The first install shows a Windows SmartScreen warning (the installer isn't
+  code-signed) — click **More info → Run anyway**.
+- `npm run desktop:pack` builds an unpacked app for quick local testing;
+  `npm run desktop:bundle` builds just the server bundle.
+- The web workflow (`npm run dev`) keeps working exactly as before.
+
 ## Roadmap
 
-- **Phase 2** — Desktop app (Electron): double-click install, no Node required.
 - **Phase 3** — Optional two-laptop sync via a shared folder (offline-first, no accounts).

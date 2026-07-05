@@ -2,12 +2,49 @@
   "name": "grading-system",
   "version": "0.1.0",
   "private": true,
+  "description": "Faculty Gradebook — offline-first desktop gradebook for instructors",
+  "author": "Jelou Alonzo",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migrate:from-mysql": "node scripts/migrate-mysql-to-sqlite.mjs"
+    "migrate:from-mysql": "node scripts/migrate-mysql-to-sqlite.mjs",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:pack": "node scripts/build-desktop.mjs --dir",
+    "desktop:bundle": "node scripts/build-desktop.mjs --no-pack"
+  },
+  "build": {
+    "appId": "com.jeloualonzo.gradebook",
+    "productName": "Gradebook",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "!node_modules/**/*"
+    ],
+    "afterPack": "scripts/after-pack.js",
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Gradebook-Setup-${version}.${ext}",
+      "shortcutName": "Gradebook"
+    }
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -24,6 +61,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "electron": "^42.6.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4"

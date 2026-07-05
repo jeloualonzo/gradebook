@@ -42,3 +42,10 @@ next-env.d.ts
 
 # local database + device identity (SQLite storage — never commit)
 /data/
+
+# electron-builder output
+/dist/
+
+# generated at build time from build/icon.b64
+/build/icon.ico
+/build/icon.png
