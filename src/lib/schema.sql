@@ -66,3 +66,23 @@ CREATE TABLE IF NOT EXISTS attendance_config (
   UNIQUE KEY uq_period (period_id),
   FOREIGN KEY (period_id) REFERENCES grading_periods(id) ON DELETE CASCADE
 );
+
+-- Student Groups: reusable rosters independent from any subject.
+-- Importing a group into a subject COPIES the students, so gradebooks stay
+-- independent even if the group changes later.
+CREATE TABLE IF NOT EXISTS student_groups (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description VARCHAR(500) NOT NULL DEFAULT '',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS group_students (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  group_id INT NOT NULL,
+  last_name VARCHAR(100) NOT NULL,
+  first_name VARCHAR(100) NOT NULL,
+  middle_name VARCHAR(100) NOT NULL DEFAULT '',
+  sort_order INT NOT NULL DEFAULT 0,
+  FOREIGN KEY (group_id) REFERENCES student_groups(id) ON DELETE CASCADE
+);
