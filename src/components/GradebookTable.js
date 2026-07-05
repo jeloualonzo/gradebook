@@ -338,7 +338,7 @@ export default function GradebookTable({
             const finalGrade = computeFinalSubjectGrade(periodGrades, subject);
 
             return (
-              <tr key={student.id} className="hover:bg-gray-50/50">
+              <tr key={student.id}>
                 <td className={`${STICKY_NO} bg-white text-center text-gray-400 py-1`}>{idx + 1}</td>
                 <td
                   className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800 truncate max-w-[180px]`}
