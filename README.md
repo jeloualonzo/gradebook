@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Faculty Gradebook
+
+A spreadsheet-style gradebook for instructors: subjects with PRELIM / MIDTERM / FINAL
+grading periods, weighted assessments, quick attendance, reusable student groups with
+Excel import, undo/redo, and keyboard-first score encoding.
+
+Built with [Next.js](https://nextjs.org) + React. **Storage is a zero-configuration
+SQLite database** — no database server, no ports, no environment variables.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). That's it — on first run the app
+creates its database automatically.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Where your data lives
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Everything is stored in the `data/` folder (created automatically, ignored by git):
 
-## Learn More
+| File | Purpose |
+|---|---|
+| `data/gradebook.sqlite` | The entire database — one file. **Backup = copy this file.** |
+| `data/device.json` | This installation's identity (a generated device id + label). Used to tag which laptop created each subject/group — not an account, nothing to log into. |
 
-To learn more about Next.js, take a look at the following resources:
+Set `GRADEBOOK_DATA_DIR` to relocate the folder (the desktop build will point this at
+the OS app-data directory).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> ⚠️ Don't place `data/` inside a cloud-synced folder (Dropbox/Drive/OneDrive) —
+> cloud clients can corrupt a live SQLite database. Future sync exchanges exported
+> snapshots instead.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Migrating from the old MySQL setup
 
-## Deploy on Vercel
+If you previously ran this app against MySQL, a one-time converter carries everything
+over (mapping ids to UUIDs, preserving all relationships):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+DB_HOST=localhost DB_PORT=3307 DB_NAME=gradebook DB_USER=root DB_PASSWORD=... \
+  npm run migrate:from-mysql
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+It refuses to overwrite an SQLite database that already has data (`--force` to merge).
+After migrating, MySQL can be uninstalled — the app never touches it again.
+
+## Importing students from Excel
+
+Student Groups accept `.xlsx` / `.xls` rosters with exactly three columns —
+**First Name, Middle Name, Last Name** (case-insensitive headers). Blank rows are
+ignored, values are trimmed, and duplicates (same full name) are skipped automatically.
+
+## Roadmap
+
+- **Phase 2** — Desktop app (Electron): double-click install, no Node required.
+- **Phase 3** — Optional two-laptop sync via a shared folder (offline-first, no accounts).
