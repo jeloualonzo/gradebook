@@ -2,8 +2,7 @@
  * Desktop build pipeline.
  *
  * 1. Build the Next.js app with `output: 'standalone'` (self-contained server)
- * 2. Copy in the pieces standalone doesn't include (static assets, public/,
- *    schema.sql)
+ * 2. Copy in the pieces standalone doesn't include (static assets, public/)
  * 3. Swap the bundled better-sqlite3 native binary for one built against
  *    ELECTRON's ABI (the root node_modules copy stays on Node's ABI, so the
  *    web workflow is unaffected)
@@ -84,19 +83,29 @@ run(node, [path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'buil
   env: { ...process.env, BUILD_STANDALONE: '1' },
 });
 
-// Guard against ever shipping a local database inside the bundle.
-if (fs.existsSync(path.join(standalone, 'data'))) {
-  console.error('Refusing to continue: local data/ was traced into the bundle.');
-  process.exit(1);
+// Guards against tracer regressions. Next's output tracing globbed the ENTIRE
+// project root into the bundle once (gigabytes: src/, scripts/, dist/ — even
+// previous builds, recursively) because a runtime file read used a path it
+// could not statically resolve. The schema is a static import now, but if any
+// future code reintroduces a dynamic fs read, fail LOUDLY here instead of
+// silently shipping a 1.5 GB installer.
+for (const junk of ['data', 'src', 'scripts', 'dist', 'electron', 'build', 'README.md']) {
+  if (fs.existsSync(path.join(standalone, junk))) {
+    console.error(
+      `Refusing to continue: "${junk}" was traced into the standalone bundle.\n` +
+      'Some server code reads a file via a runtime-computed path — find it and\n' +
+      'make it a static import instead (see src/lib/schema.mjs for the pattern).'
+    );
+    process.exit(1);
+  }
 }
 
 // 2. Assets the standalone output does not include ----------------------------
-console.log('\n→ copying static assets, public/, schema.sql into the bundle');
+console.log('\n→ copying static assets and public/ into the bundle');
 fs.cpSync(path.join(root, '.next', 'static'), path.join(standalone, '.next', 'static'), { recursive: true });
 if (fs.existsSync(path.join(root, 'public'))) {
   fs.cpSync(path.join(root, 'public'), path.join(standalone, 'public'), { recursive: true });
 }
-fs.copyFileSync(path.join(root, 'src', 'lib', 'schema.sql'), path.join(standalone, 'schema.sql'));
 
 // 3. Electron-ABI better-sqlite3 in the bundle --------------------------------
 // Two passes: first the HOST platform's binary so we can verify the bundle

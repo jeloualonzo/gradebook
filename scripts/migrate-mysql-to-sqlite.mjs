@@ -28,7 +28,8 @@ fs.mkdirSync(dataDir, { recursive: true });
 const sqlite = new Database(path.join(dataDir, 'gradebook.sqlite'));
 sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
-sqlite.exec(fs.readFileSync(path.join(process.cwd(), 'src/lib/schema.sql'), 'utf8'));
+const { SCHEMA_SQL } = await import(path.join(process.cwd(), 'src/lib/schema.mjs'));
+sqlite.exec(SCHEMA_SQL);
 if (sqlite.pragma('user_version', { simple: true }) < 1) sqlite.pragma('user_version = 1');
 
 // Device identity (same file the app uses).

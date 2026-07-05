@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { runMigrations } from './migrations';
+import { SCHEMA_SQL } from './schema.mjs';
 
 /**
  * SQLite storage engine — zero configuration by design.
@@ -10,8 +11,12 @@ import { runMigrations } from './migrations';
  * - The database is a single file in the data directory (default: ./data,
  *   overridable with GRADEBOOK_DATA_DIR — the Electron shell points this at
  *   the OS app-data folder).
- * - The schema bootstraps itself on first open (CREATE TABLE IF NOT EXISTS),
- *   so there is nothing to install, configure, or migrate by hand.
+ * - The schema is statically imported (src/lib/schema.mjs) and bootstraps
+ *   itself on first open (CREATE TABLE IF NOT EXISTS) — nothing to install,
+ *   configure, or migrate by hand. IMPORTANT: never load the schema (or any
+ *   file) via a runtime-computed path here — dynamic fs reads in server code
+ *   make Next's output tracing glob the whole project into the desktop
+ *   bundle (see src/lib/schema.mjs for the full story).
  * - device.json holds this installation's identity (a generated device id and
  *   a friendly label). It lives NEXT TO the database on purpose: identity
  *   belongs to the installation, not inside the synced data.
@@ -25,14 +30,8 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.pragma('busy_timeout = 5000');
 
-// Bootstrap / upgrade schema. In the packaged desktop app the schema file
-// lives next to the bundled server, located via GRADEBOOK_SCHEMA_PATH.
-// (turbopackIgnore keeps the tracer from pulling the whole project into the
-// standalone bundle because of this dynamic path.)
-const schemaPath =
-  process.env.GRADEBOOK_SCHEMA_PATH ||
-  path.join(/* turbopackIgnore: true */ process.cwd(), 'src/lib/schema.sql');
-db.exec(fs.readFileSync(schemaPath, 'utf8'));
+// Bootstrap the schema (statically imported — no file read at runtime).
+db.exec(SCHEMA_SQL);
 // Upgrade older databases in place (see src/lib/migrations.js) — this is
 // what makes app updates safe over real data.
 runMigrations(db);

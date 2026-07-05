@@ -85,7 +85,6 @@ async function start() {
       PORT: String(port),
       HOSTNAME: '127.0.0.1',
       GRADEBOOK_DATA_DIR: dataDir,
-      GRADEBOOK_SCHEMA_PATH: path.join(serverRoot, 'schema.sql'),
     },
   });
   serverProc.stdout?.on('data', d => log(`[server] ${String(d).trimEnd()}`));

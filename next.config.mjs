@@ -7,9 +7,14 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig = {
   serverExternalPackages: ['better-sqlite3', 'exceljs'],
   // Anchor file tracing to THIS project (otherwise Next may infer a parent
-  // workspace root and nest the standalone output), and never trace the
-  // local database into a build.
+  // workspace root and nest the standalone output).
   outputFileTracingRoot: projectRoot,
+  // db.js reads device.json from GRADEBOOK_DATA_DIR || ./data — the tracer
+  // follows the ./data fallback, and the local dev database must never ship
+  // inside a build. This is the ONLY sanctioned dynamic file read in server
+  // code; anything else must be a static import (a dynamic read once made the
+  // tracer glob the entire project root into the desktop bundle — see
+  // src/lib/schema.mjs and the guard in scripts/build-desktop.mjs).
   outputFileTracingExcludes: {
     '*': ['data/**'],
   },

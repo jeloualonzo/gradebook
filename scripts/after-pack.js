@@ -19,7 +19,7 @@ module.exports = async function afterPack(context) {
   fs.cpSync(src, dest, { recursive: true });
 
   // Sanity: the pieces the app cannot start without.
-  for (const f of ['server.js', 'schema.sql', 'node_modules/better-sqlite3', 'node_modules/next', '.next/static']) {
+  for (const f of ['server.js', 'node_modules/better-sqlite3', 'node_modules/next', '.next/static']) {
     if (!fs.existsSync(path.join(dest, f))) {
       throw new Error(`Packaged server bundle is missing: ${f}`);
     }

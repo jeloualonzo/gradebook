@@ -1,7 +1,7 @@
 /**
  * Versioned schema migrations — how app updates keep existing data safe.
  *
- * - schema.sql always describes the CURRENT schema, written entirely with
+ * - schema.mjs always describes the CURRENT schema, written entirely with
  *   CREATE ... IF NOT EXISTS. On a fresh install it creates everything at
  *   the newest shape; on an existing database it is a no-op for tables that
  *   already exist (their old shape is preserved for the migrations below).
@@ -11,7 +11,7 @@
  *   never dropped, exported, or recreated.
  *
  * Adding a migration (whenever a future feature changes the schema):
- *   1. Update schema.sql to the new shape (covers fresh installs).
+ *   1. Update schema.mjs to the new shape (covers fresh installs).
  *   2. Bump SCHEMA_VERSION.
  *   3. Register MIGRATIONS[<new version>] with the in-place upgrade for
  *      databases created before this version.
@@ -19,7 +19,7 @@
  * Rules for migration steps:
  *   - Additive only: ALTER TABLE ... ADD COLUMN, CREATE TABLE/INDEX.
  *     Never DROP tables or columns that hold user data.
- *   - schema.sql runs BEFORE migrations, so guard anything it also creates
+ *   - schema.mjs runs BEFORE migrations, so guard anything it also creates
  *     (new tables/indexes) with IF NOT EXISTS inside the step too.
  *   - New columns must be NULLable or carry a DEFAULT — existing rows must
  *     stay valid without a rewrite.
@@ -46,7 +46,7 @@ export function runMigrations(
   const from = db.pragma('user_version', { simple: true });
 
   if (from === 0) {
-    // Brand-new database: schema.sql (already executed by the caller) just
+    // Brand-new database: the schema (already executed by the caller) just
     // created the current shape directly — stamp it and done.
     db.pragma(`user_version = ${targetVersion}`);
     return { from: 0, to: targetVersion, applied: [] };
