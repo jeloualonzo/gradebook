@@ -50,9 +50,8 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onHi
     if (!res.ok) throw new Error('Save failed');
   };
 
-  const handleChange = (e) => {
-    const v = e.target.value;
-    setValue(v); // local only — the rest of the grid does not re-render
+  // Debounced background save with rollback on failure.
+  const scheduleSave = (v) => {
     save(
       `${columnId}-${studentId}`,
       async () => {
@@ -69,8 +68,16 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onHi
     );
   };
 
-  const handleFocus = () => {
+  const handleChange = (e) => {
+    const v = e.target.value;
+    setValue(v); // local only — the rest of the grid does not re-render
+    scheduleSave(v);
+  };
+
+  const handleFocus = (e) => {
     focusValueRef.current = value;
+    // Spreadsheet-style: selecting a cell selects its content (type to replace).
+    e.target.select();
   };
 
   const handleBlur = () => {
@@ -94,14 +101,101 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onHi
     });
   };
 
+  // ---- Spreadsheet-style keyboard navigation --------------------------------
+  // DOM-query based (like Excel's grid): works regardless of memoization and
+  // stays scoped to the gradebook because handlers live on the cells.
+  const focusCell = (el) => {
+    if (!el) return false;
+    el.focus();
+    el.select?.();
+    return true;
+  };
+  const columnCells = () =>
+    Array.from(document.querySelectorAll(`input[data-cell="score"][data-col="${columnId}"]`));
+  const rowCells = (target) =>
+    Array.from(target.closest('tr')?.querySelectorAll('input[data-cell="score"]') || []);
+
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      const cells = document.querySelectorAll(`[data-col="${columnId}"]`);
-      const current = Array.from(cells).indexOf(e.target);
-      if (current < cells.length - 1) cells[current + 1].focus();
+    // Never shadow Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z or browser shortcuts.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+
+    switch (e.key) {
+      case 'ArrowDown': {
+        e.preventDefault(); // also stops the number input from decrementing
+        const cells = columnCells();
+        focusCell(cells[cells.indexOf(t) + 1]);
+        break;
+      }
+      case 'ArrowUp': {
+        e.preventDefault(); // also stops the number input from incrementing
+        const cells = columnCells();
+        const i = cells.indexOf(t);
+        if (i > 0) focusCell(cells[i - 1]);
+        // From the top student row, move up into the column's max-score cell.
+        else focusCell(document.querySelector(`input[data-max-for="${columnId}"]`));
+        break;
+      }
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        e.preventDefault();
+        const cells = rowCells(t);
+        focusCell(cells[cells.indexOf(t) + (e.key === 'ArrowRight' ? 1 : -1)]);
+        break;
+      }
+      case 'Enter': {
+        e.preventDefault();
+        const cells = columnCells();
+        const next = cells[cells.indexOf(t) + 1];
+        if (next) focusCell(next); // commit happens via blur
+        else t.blur(); // last row: commit and stay (Excel-like)
+        break;
+      }
+      case 'Escape': {
+        // Cancel the edit: restore the value from when the cell was entered —
+        // in the UI, the shared scores map, AND the background save — then
+        // exit edit mode. No history entry is recorded (blur sees no change).
+        e.preventDefault();
+        const before = focusValueRef.current;
+        if (before !== undefined && before !== value) {
+          setValue(before);
+          onUpdate(columnId, studentId, before === '' ? null : before);
+          scheduleSave(before);
+        }
+        requestAnimationFrame(() => t.blur());
+        break;
+      }
+      case 'Delete': {
+        // Clear the cell's value (never the column) and keep the selection.
+        e.preventDefault();
+        setValue('');
+        onUpdate(columnId, studentId, null);
+        scheduleSave('');
+        break;
+      }
+      case 'Home':
+      case 'End': {
+        e.preventDefault();
+        const cells = rowCells(t);
+        focusCell(e.key === 'Home' ? cells[0] : cells[cells.length - 1]);
+        break;
+      }
+      case 'PageDown':
+      case 'PageUp': {
+        // Scroll horizontally across grading periods in large gradebooks.
+        e.preventDefault();
+        const scroller = t.closest('.overflow-x-auto');
+        scroller?.scrollBy({
+          left: (e.key === 'PageDown' ? 1 : -1) * scroller.clientWidth * 0.8,
+          behavior: 'smooth',
+        });
+        break;
+      }
+      default:
+        break;
     }
-    if (e.key === 'Tab') {
-    }
+    // Tab / Shift+Tab intentionally keep native behavior: save (via blur) and
+    // move right / left through the grid's inputs.
   };
 
   return (
@@ -116,6 +210,7 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onHi
       onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
+      data-cell="score"
       data-col={columnId}
       className={`score-cell w-full text-center text-xs py-1.5 border-0 focus:bg-blue-50 transition-colors ${
         isEmpty ? 'missing-score' : isOver ? 'bg-red-50 text-red-700' : 'bg-white'

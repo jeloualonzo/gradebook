@@ -1,5 +1,5 @@
 'use client';
-import { useState, memo } from 'react';
+import { useState, useRef, memo } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 import { formatNumber, toCents, centsToNumber } from '@/lib/gradeCalculator';
 import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
@@ -55,6 +55,8 @@ function AssessmentBlock({
   const [weight, setWeight] = useState(assessment.weight_percent);
   const [confirmDeleteColumn, setConfirmDeleteColumn] = useState(null);
   const [editingDate, setEditingDate] = useState(null);
+  // Set when Escape cancels a date edit, so the blur commit is skipped.
+  const dateCancelRef = useRef(false);
 
   // Keep local edit buffers in sync when the assessment changes externally
   // (e.g. after an undo/redo refresh). Render-time adjustment per React docs.
@@ -274,6 +276,11 @@ function AssessmentBlock({
   // the new date shows instantly; the save happens silently in the background.
   const commitDate = async (col, inputValue) => {
     setEditingDate(null);
+    // Escape pressed: exit edit mode without saving anything.
+    if (dateCancelRef.current) {
+      dateCancelRef.current = false;
+      return;
+    }
     const prev = toDateInputValue(col.date);
     const next = inputValue || '';
     if (next === prev) return;
@@ -471,9 +478,20 @@ function AssessmentBlock({
               onBlur={e => {
                 const v = e.target.value;
                 setAddingDate(false);
+                if (dateCancelRef.current) {
+                  dateCancelRef.current = false;
+                  return;
+                }
                 if (v) addColumnWithDate(v);
               }}
-              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              onKeyDown={e => {
+                if (e.key === 'Enter') e.target.blur();
+                else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  dateCancelRef.current = true;
+                  e.target.blur();
+                }
+              }}
             />
           )}
         </th>
@@ -500,7 +518,15 @@ function AssessmentBlock({
                 defaultValue={toDateInputValue(col.date)}
                 onFocus={e => { try { e.target.showPicker?.(); } catch {} }}
                 onBlur={e => commitDate(col, e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') e.target.blur();
+                  else if (e.key === 'Escape') {
+                    // Cancel: exit without saving (blur commit is skipped).
+                    e.preventDefault();
+                    dateCancelRef.current = true;
+                    e.target.blur();
+                  }
+                }}
               />
             )}
             {!assessment.is_exam && (
@@ -547,8 +573,31 @@ function AssessmentBlock({
               type="number"
               min="0"
               defaultValue={formatNumber(col.max_score)}
+              data-cell="max"
+              data-max-for={col.id}
+              onFocus={e => e.target.select()}
               onBlur={e => commitMaxScore(col, e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              onKeyDown={e => {
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                const focusCell = (el) => { if (el) { el.focus(); el.select?.(); } };
+                if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                  // Commit (via blur) and move down into the first student row.
+                  e.preventDefault();
+                  focusCell(document.querySelector(`input[data-cell="score"][data-col="${col.id}"]`));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault(); // just stop the number spinner
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                  e.preventDefault();
+                  const cells = Array.from(document.querySelectorAll('input[data-cell="max"]'));
+                  focusCell(cells[cells.indexOf(e.target) + (e.key === 'ArrowRight' ? 1 : -1)]);
+                } else if (e.key === 'Escape') {
+                  // Cancel: restore the stored value, then exit (no save —
+                  // the blur commit sees an unchanged value).
+                  e.preventDefault();
+                  e.target.value = formatNumber(col.max_score);
+                  e.target.blur();
+                }
+              }}
               className="w-full text-center text-[10px] border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
               title="Max score"
             />
