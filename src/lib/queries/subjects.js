@@ -1,83 +1,115 @@
-import pool from '@/lib/db';
+import db from '@/lib/db';
 
 export async function getAllSubjects() {
-  const [rows] = await pool.query(
-    'SELECT * FROM subjects ORDER BY created_at DESC'
-  );
-  return rows;
+  return db.all('SELECT * FROM subjects WHERE deleted_at IS NULL ORDER BY created_at DESC');
 }
 
 export async function getSubjectById(id) {
-  const [rows] = await pool.query('SELECT * FROM subjects WHERE id = ?', [id]);
-  return rows[0] || null;
+  return db.get('SELECT * FROM subjects WHERE id = ? AND deleted_at IS NULL', [id]) || null;
 }
 
 export async function createSubject({ name, section, school_year, semester, prelim_weight = 30, midterm_weight = 30, final_weight = 40 }) {
-  const [result] = await pool.query(
-    `INSERT INTO subjects (name, section, school_year, semester, prelim_weight, midterm_weight, final_weight)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [name, section, school_year, semester, prelim_weight, midterm_weight, final_weight]
+  const id = db.newId();
+  const now = db.now();
+  db.run(
+    `INSERT INTO subjects (id, name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, owner_device_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.getDeviceId(), now, now]
   );
-  return result.insertId;
+  return id;
 }
 
 export async function updateSubject(id, { name, section, school_year, semester, prelim_weight, midterm_weight, final_weight }) {
-  await pool.query(
-    `UPDATE subjects SET name=?, section=?, school_year=?, semester=?, prelim_weight=?, midterm_weight=?, final_weight=?
+  db.run(
+    `UPDATE subjects SET name=?, section=?, school_year=?, semester=?, prelim_weight=?, midterm_weight=?, final_weight=?, updated_at=?
      WHERE id=?`,
-    [name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, id]
+    [name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.now(), id]
   );
 }
 
 export async function deleteSubject(id) {
-  await pool.query('DELETE FROM subjects WHERE id = ?', [id]);
+  // Cascade tombstone the whole subject tree so the deletion syncs cleanly.
+  const now = db.now();
+  db.transaction(() => {
+    db.run(
+      `UPDATE scores SET deleted_at=?, updated_at=?
+       WHERE deleted_at IS NULL AND student_id IN (SELECT id FROM students WHERE subject_id = ?)`,
+      [now, now, id]
+    );
+    db.run('UPDATE students SET deleted_at=?, updated_at=? WHERE subject_id=? AND deleted_at IS NULL', [now, now, id]);
+    db.run(
+      `UPDATE attendance_config SET deleted_at=?, updated_at=?
+       WHERE deleted_at IS NULL AND period_id IN (SELECT id FROM grading_periods WHERE subject_id = ?)`,
+      [now, now, id]
+    );
+    db.run(
+      `UPDATE assessment_columns SET deleted_at=?, updated_at=?
+       WHERE deleted_at IS NULL AND assessment_id IN (
+         SELECT a.id FROM assessments a
+         JOIN grading_periods gp ON gp.id = a.period_id
+         WHERE gp.subject_id = ?
+       )`,
+      [now, now, id]
+    );
+    db.run(
+      `UPDATE assessments SET deleted_at=?, updated_at=?
+       WHERE deleted_at IS NULL AND period_id IN (SELECT id FROM grading_periods WHERE subject_id = ?)`,
+      [now, now, id]
+    );
+    db.run('UPDATE grading_periods SET deleted_at=?, updated_at=? WHERE subject_id=? AND deleted_at IS NULL', [now, now, id]);
+    db.run('UPDATE subjects SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, id]);
+  });
 }
 
 export async function duplicateSubject(id) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-
-    const [[src]] = await conn.query('SELECT * FROM subjects WHERE id = ?', [id]);
-    const [subjectResult] = await conn.query(
-      `INSERT INTO subjects (name, section, school_year, semester, prelim_weight, midterm_weight, final_weight)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [`${src.name} (Copy)`, src.section, src.school_year, src.semester, src.prelim_weight, src.midterm_weight, src.final_weight]
+  let newSubjectId = null;
+  db.transaction(() => {
+    const src = db.get('SELECT * FROM subjects WHERE id = ? AND deleted_at IS NULL', [id]);
+    if (!src) throw new Error('Subject not found');
+    const now = db.now();
+    newSubjectId = db.newId();
+    db.run(
+      `INSERT INTO subjects (id, name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, owner_device_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [newSubjectId, `${src.name} (Copy)`, src.section, src.school_year, src.semester,
+        src.prelim_weight, src.midterm_weight, src.final_weight, db.getDeviceId(), now, now]
     );
-    const newSubjectId = subjectResult.insertId;
 
-    const [periods] = await conn.query('SELECT * FROM grading_periods WHERE subject_id = ?', [id]);
+    const periods = db.all('SELECT * FROM grading_periods WHERE subject_id = ? AND deleted_at IS NULL', [id]);
     for (const period of periods) {
-      const [periodResult] = await conn.query(
-        'INSERT INTO grading_periods (subject_id, type) VALUES (?, ?)',
-        [newSubjectId, period.type]
+      const newPeriodId = db.newId();
+      db.run(
+        'INSERT INTO grading_periods (id, subject_id, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [newPeriodId, newSubjectId, period.type, now, now]
       );
-      const newPeriodId = periodResult.insertId;
 
-      const [attConfigs] = await conn.query('SELECT * FROM attendance_config WHERE period_id = ?', [period.id]);
-      if (attConfigs.length > 0) {
-        const ac = attConfigs[0];
-        await conn.query(
-          'INSERT INTO attendance_config (period_id, present_score, late_score, absent_score) VALUES (?, ?, ?, ?)',
-          [newPeriodId, ac.present_score, ac.late_score, ac.absent_score]
+      const ac = db.get('SELECT * FROM attendance_config WHERE period_id = ? AND deleted_at IS NULL', [period.id]);
+      if (ac) {
+        db.run(
+          'INSERT INTO attendance_config (id, period_id, present_score, late_score, absent_score, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [db.newId(), newPeriodId, ac.present_score, ac.late_score, ac.absent_score, now, now]
         );
       }
 
-      const [assessments] = await conn.query('SELECT * FROM assessments WHERE period_id = ? ORDER BY sort_order', [period.id]);
+      const assessments = db.all(
+        'SELECT * FROM assessments WHERE period_id = ? AND deleted_at IS NULL ORDER BY is_exam, sort_order',
+        [period.id]
+      );
       for (const assessment of assessments) {
-        await conn.query(
-          'INSERT INTO assessments (period_id, name, is_exam, sort_order, weight_percent) VALUES (?, ?, ?, ?, ?)',
-          [newPeriodId, assessment.name, assessment.is_exam, assessment.sort_order, assessment.weight_percent]
+        const newAssessmentId = db.newId();
+        db.run(
+          'INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [newAssessmentId, newPeriodId, assessment.name, assessment.is_exam, assessment.sort_order, assessment.weight_percent, now, now]
         );
+        // Keep the invariant: every exam has exactly one date column.
+        if (assessment.is_exam) {
+          db.run(
+            'INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, created_at, updated_at) VALUES (?, ?, NULL, ?, 0, ?, ?)',
+            [db.newId(), newAssessmentId, 100, now, now]
+          );
+        }
       }
     }
-
-    await conn.commit();
-    return newSubjectId;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
+  return newSubjectId;
 }

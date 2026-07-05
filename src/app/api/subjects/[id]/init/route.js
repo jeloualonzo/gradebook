@@ -1,4 +1,3 @@
-import pool from '@/lib/db';
 import { createPeriod, createAssessment, upsertAttendanceConfig, normalizeExamLast } from '@/lib/queries/assessments';
 
 export async function POST(request, { params }) {

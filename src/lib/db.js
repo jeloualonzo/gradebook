@@ -1,58 +1,96 @@
-import mysql from 'mysql2/promise';
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '3307', 10),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  multipleStatements: true,
-  // Return DATE/DATETIME columns as plain strings (e.g. '2026-06-16') instead
-  // of JS Date objects. JS Dates get serialized to UTC ISO strings in API
-  // responses, which shifts calendar dates by one day for timezones ahead of
-  // UTC. Keeping dates as strings end-to-end preserves the exact date picked.
-  dateStrings: true,
-});
+/**
+ * SQLite storage engine — zero configuration by design.
+ *
+ * - The database is a single file in the data directory (default: ./data,
+ *   overridable with GRADEBOOK_DATA_DIR — the Electron shell points this at
+ *   the OS app-data folder).
+ * - The schema bootstraps itself on first open (CREATE TABLE IF NOT EXISTS),
+ *   so there is nothing to install, configure, or migrate by hand.
+ * - device.json holds this installation's identity (a generated device id and
+ *   a friendly label). It lives NEXT TO the database on purpose: identity
+ *   belongs to the installation, not inside the synced data.
+ */
 
-let initialized = false;
+const SCHEMA_VERSION = 1;
 
-async function ensureInitialized() {
-  if (initialized) return;
-  try {
-    // Connect without database first to ensure the database exists
-    const tempConn = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '3307', 10),
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-    });
-    await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${process.env.DB_NAME || 'gradebook'}\``);
-    await tempConn.end();
+const dataDir = process.env.GRADEBOOK_DATA_DIR || path.join(process.cwd(), 'data');
+fs.mkdirSync(dataDir, { recursive: true });
 
-    const schemaPath = path.join(process.cwd(), 'src/lib/schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-    await pool.query(schema);
-    initialized = true;
-  } catch (err) {
-    console.error('Failed to initialize database:', err);
-    throw err;
-  }
+const db = new Database(path.join(dataDir, 'gradebook.sqlite'));
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
+
+// Bootstrap / upgrade schema.
+const schemaPath = path.join(process.cwd(), 'src/lib/schema.sql');
+db.exec(fs.readFileSync(schemaPath, 'utf8'));
+if (db.pragma('user_version', { simple: true }) < SCHEMA_VERSION) {
+  db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
-const db = {
-  async query(sql, params) {
-    await ensureInitialized();
-    return pool.query(sql, params);
+// ---- Device identity (no accounts — one generated id per installation) ----
+const devicePath = path.join(dataDir, 'device.json');
+
+function loadDevice() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(devicePath, 'utf8'));
+    if (parsed?.device_id) return parsed;
+  } catch {
+    /* first run */
+  }
+  const device = { device_id: crypto.randomUUID(), device_label: null };
+  fs.writeFileSync(devicePath, JSON.stringify(device, null, 2));
+  return device;
+}
+
+const device = loadDevice();
+
+// ---- Small, explicit query API (used only by src/lib/queries/*) -----------
+const api = {
+  /** All rows for a SELECT. */
+  all(sql, params = []) {
+    return db.prepare(sql).all(...params);
   },
-  async getConnection() {
-    await ensureInitialized();
-    return pool.getConnection();
+  /** First row (or undefined) for a SELECT. */
+  get(sql, params = []) {
+    return db.prepare(sql).get(...params);
   },
+  /** Execute an INSERT/UPDATE/DELETE. Returns better-sqlite3 run info. */
+  run(sql, params = []) {
+    return db.prepare(sql).run(...params);
+  },
+  /** Run `fn` inside a transaction (synchronous, like better-sqlite3). */
+  transaction(fn) {
+    return db.transaction(fn)();
+  },
+  /** New UUID primary key. */
+  newId() {
+    return crypto.randomUUID();
+  },
+  /** Current timestamp — ISO-8601 UTC, lexicographically sortable (LWW key). */
+  now() {
+    return new Date().toISOString();
+  },
+  /** This installation's device identity. */
+  getDeviceId() {
+    return device.device_id;
+  },
+  getDeviceLabel() {
+    return device.device_label;
+  },
+  /** Paths, for backups/diagnostics (used by later phases). */
+  paths: {
+    dataDir,
+    database: path.join(dataDir, 'gradebook.sqlite'),
+    device: devicePath,
+  },
+  /** The raw better-sqlite3 handle (converter/tests only). */
+  raw: db,
 };
 
-export default db;
+export default api;

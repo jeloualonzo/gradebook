@@ -1,4 +1,4 @@
-import pool from '@/lib/db';
+import db from '@/lib/db';
 
 /**
  * Student Groups: reusable rosters independent from any subject.
@@ -15,141 +15,136 @@ export function fullNameKey({ first_name = '', middle_name = '', last_name = '' 
 }
 
 export async function getAllGroups() {
-  const [rows] = await pool.query(
+  return db.all(
     `SELECT g.*, COUNT(gs.id) AS student_count
      FROM student_groups g
-     LEFT JOIN group_students gs ON gs.group_id = g.id
+     LEFT JOIN group_students gs ON gs.group_id = g.id AND gs.deleted_at IS NULL
+     WHERE g.deleted_at IS NULL
      GROUP BY g.id
      ORDER BY g.created_at DESC`
   );
-  return rows;
 }
 
 export async function getGroupById(id) {
-  const [rows] = await pool.query('SELECT * FROM student_groups WHERE id = ?', [id]);
-  return rows[0] || null;
+  return db.get('SELECT * FROM student_groups WHERE id = ? AND deleted_at IS NULL', [id]) || null;
 }
 
 export async function createGroup({ name, description = '' }) {
-  const [result] = await pool.query(
-    'INSERT INTO student_groups (name, description) VALUES (?, ?)',
-    [name, description || '']
+  const id = db.newId();
+  const now = db.now();
+  db.run(
+    'INSERT INTO student_groups (id, name, description, owner_device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, name, description || '', db.getDeviceId(), now, now]
   );
-  return result.insertId;
+  return id;
 }
 
 export async function updateGroup(id, { name, description = '' }) {
-  await pool.query(
-    'UPDATE student_groups SET name = ?, description = ? WHERE id = ?',
-    [name, description || '', id]
+  db.run(
+    'UPDATE student_groups SET name = ?, description = ?, updated_at = ? WHERE id = ?',
+    [name, description || '', db.now(), id]
   );
 }
 
 export async function deleteGroup(id) {
-  await pool.query('DELETE FROM student_groups WHERE id = ?', [id]);
+  const now = db.now();
+  db.transaction(() => {
+    db.run('UPDATE group_students SET deleted_at=?, updated_at=? WHERE group_id=? AND deleted_at IS NULL', [now, now, id]);
+    db.run('UPDATE student_groups SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, id]);
+  });
 }
 
 export async function duplicateGroup(id) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [[src]] = await conn.query('SELECT * FROM student_groups WHERE id = ?', [id]);
+  let newGroupId = null;
+  db.transaction(() => {
+    const src = db.get('SELECT * FROM student_groups WHERE id = ? AND deleted_at IS NULL', [id]);
     if (!src) throw new Error('Group not found');
-    const [groupResult] = await conn.query(
-      'INSERT INTO student_groups (name, description) VALUES (?, ?)',
-      [`${src.name} (Copy)`, src.description]
+    const now = db.now();
+    newGroupId = db.newId();
+    db.run(
+      'INSERT INTO student_groups (id, name, description, owner_device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [newGroupId, `${src.name} (Copy)`, src.description, db.getDeviceId(), now, now]
     );
-    const newGroupId = groupResult.insertId;
-    const [students] = await conn.query(
-      'SELECT * FROM group_students WHERE group_id = ? ORDER BY sort_order, last_name, first_name',
+    const students = db.all(
+      `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
+       ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
       [id]
     );
     for (const s of students) {
-      await conn.query(
-        'INSERT INTO group_students (group_id, last_name, first_name, middle_name, sort_order) VALUES (?, ?, ?, ?, ?)',
-        [newGroupId, s.last_name, s.first_name, s.middle_name, s.sort_order]
+      db.run(
+        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), newGroupId, s.last_name, s.first_name, s.middle_name, s.sort_order, now, now]
       );
     }
-    await conn.commit();
-    return newGroupId;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
+  return newGroupId;
 }
 
 export async function getGroupStudents(groupId) {
-  const [rows] = await pool.query(
-    'SELECT * FROM group_students WHERE group_id = ? ORDER BY sort_order, last_name, first_name',
+  return db.all(
+    `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
+     ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
     [groupId]
   );
-  return rows;
 }
 
 export async function createGroupStudent(groupId, { last_name, first_name, middle_name = '' }) {
-  const [[{ maxOrder }]] = await pool.query(
-    'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM group_students WHERE group_id = ?',
+  const { maxOrder } = db.get(
+    'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
     [groupId]
   );
-  const [result] = await pool.query(
-    'INSERT INTO group_students (group_id, last_name, first_name, middle_name, sort_order) VALUES (?, ?, ?, ?, ?)',
-    [groupId, last_name, first_name, middle_name || '', maxOrder + 1]
+  const id = db.newId();
+  const now = db.now();
+  db.run(
+    'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, groupId, last_name, first_name, middle_name || '', maxOrder + 1, now, now]
   );
-  return result.insertId;
+  return id;
 }
 
 export async function updateGroupStudent(id, { last_name, first_name, middle_name = '' }) {
-  await pool.query(
-    'UPDATE group_students SET last_name=?, first_name=?, middle_name=? WHERE id=?',
-    [last_name, first_name, middle_name || '', id]
+  db.run(
+    'UPDATE group_students SET last_name=?, first_name=?, middle_name=?, updated_at=? WHERE id=?',
+    [last_name, first_name, middle_name || '', db.now(), id]
   );
 }
 
 export async function deleteGroupStudent(id) {
-  await pool.query('DELETE FROM group_students WHERE id = ?', [id]);
+  db.run('UPDATE group_students SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [db.now(), db.now(), id]);
 }
 
 export async function reorderGroupStudents(orderedIds) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
+  const now = db.now();
+  db.transaction(() => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await conn.query('UPDATE group_students SET sort_order = ? WHERE id = ?', [i, orderedIds[i]]);
+      db.run(
+        'UPDATE group_students SET sort_order=?, updated_at=? WHERE id=? AND sort_order != ?',
+        [i, now, orderedIds[i], i]
+      );
     }
-    await conn.commit();
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
 }
 
 /**
  * Bulk-add students to a group (used by Excel import).
- * Never creates duplicates within the group: rows whose full name
- * (first + middle + last, case-insensitive, trimmed) already exists in the
- * group — or appears twice in the payload — are skipped.
- * Returns { added, skipped }.
+ * Never creates duplicates within the group (same full name, case-insensitive,
+ * against existing members or within the payload). Returns { added, skipped }.
  */
 export async function bulkAddGroupStudents(groupId, students) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [existing] = await conn.query(
-      'SELECT first_name, middle_name, last_name FROM group_students WHERE group_id = ?',
+  let added = 0;
+  let skipped = 0;
+  db.transaction(() => {
+    const existing = db.all(
+      'SELECT first_name, middle_name, last_name FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
       [groupId]
     );
     const seen = new Set(existing.map(fullNameKey));
-    const [[{ maxOrder }]] = await conn.query(
-      'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM group_students WHERE group_id = ?',
+    const { maxOrder } = db.get(
+      'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
       [groupId]
     );
     let order = maxOrder + 1;
-    let added = 0;
-    let skipped = 0;
+    const now = db.now();
     for (const s of students || []) {
       const student = {
         first_name: String(s.first_name || '').trim(),
@@ -163,67 +158,53 @@ export async function bulkAddGroupStudents(groupId, students) {
         continue;
       }
       seen.add(key);
-      await conn.query(
-        'INSERT INTO group_students (group_id, last_name, first_name, middle_name, sort_order) VALUES (?, ?, ?, ?, ?)',
-        [groupId, student.last_name, student.first_name, student.middle_name, order++]
+      db.run(
+        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), groupId, student.last_name, student.first_name, student.middle_name, order++, now, now]
       );
       added++;
     }
-    await conn.commit();
-    return { added, skipped };
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
+  return { added, skipped };
 }
 
 /**
  * One-time COPY of a group's students into a subject. New students are
  * appended after the subject's existing list; existing grades are untouched.
- * When skipDuplicates is true, students whose full name already exists in
- * the subject are skipped.
  * Returns { imported, skipped }.
  */
 export async function importGroupIntoSubject(subjectId, groupId, { skipDuplicates = false } = {}) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [groupStudents] = await conn.query(
-      'SELECT * FROM group_students WHERE group_id = ? ORDER BY sort_order, last_name, first_name',
+  let imported = 0;
+  let skipped = 0;
+  db.transaction(() => {
+    const groupStudents = db.all(
+      `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
+       ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
       [groupId]
     );
-    const [existing] = await conn.query(
-      'SELECT first_name, middle_name, last_name FROM students WHERE subject_id = ?',
+    const existing = db.all(
+      'SELECT first_name, middle_name, last_name FROM students WHERE subject_id = ? AND deleted_at IS NULL',
       [subjectId]
     );
     const seen = new Set(existing.map(fullNameKey));
-    const [[{ maxOrder }]] = await conn.query(
-      'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM students WHERE subject_id = ?',
+    const { maxOrder } = db.get(
+      'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM students WHERE subject_id = ? AND deleted_at IS NULL',
       [subjectId]
     );
     let order = maxOrder + 1;
-    let imported = 0;
-    let skipped = 0;
+    const now = db.now();
     for (const s of groupStudents) {
       if (skipDuplicates && seen.has(fullNameKey(s))) {
         skipped++;
         continue;
       }
       seen.add(fullNameKey(s));
-      await conn.query(
-        'INSERT INTO students (subject_id, last_name, first_name, middle_name, sort_order) VALUES (?, ?, ?, ?, ?)',
-        [subjectId, s.last_name, s.first_name, s.middle_name, order++]
+      db.run(
+        'INSERT INTO students (id, subject_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), subjectId, s.last_name, s.first_name, s.middle_name, order++, now, now]
       );
       imported++;
     }
-    await conn.commit();
-    return { imported, skipped };
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
+  return { imported, skipped };
 }

@@ -1,55 +1,46 @@
-import pool from '@/lib/db';
+import db from '@/lib/db';
 
 export async function getScoresBySubject(subjectId) {
-  const [rows] = await pool.query(
+  return db.all(
     `SELECT s.id, s.column_id, s.student_id, s.value
      FROM scores s
      JOIN assessment_columns ac ON ac.id = s.column_id
      JOIN assessments a ON a.id = ac.assessment_id
      JOIN grading_periods gp ON gp.id = a.period_id
-     WHERE gp.subject_id = ?`,
+     WHERE gp.subject_id = ? AND s.deleted_at IS NULL`,
     [subjectId]
   );
-  return rows;
 }
 
-export async function upsertScore(columnId, studentId, value) {
+// Clearing a score tombstones the row (so the deletion syncs); setting a
+// value inserts or REVIVES the row for that (column, student) pair.
+function upsertOne(columnId, studentId, value) {
+  const now = db.now();
   if (value === null || value === undefined || value === '') {
-    await pool.query(
-      'DELETE FROM scores WHERE column_id = ? AND student_id = ?',
-      [columnId, studentId]
+    db.run(
+      'UPDATE scores SET value=NULL, deleted_at=?, updated_at=? WHERE column_id=? AND student_id=? AND deleted_at IS NULL',
+      [now, now, columnId, studentId]
     );
     return;
   }
-  await pool.query(
-    `INSERT INTO scores (column_id, student_id, value)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE value = VALUES(value)`,
-    [columnId, studentId, value]
+  db.run(
+    `INSERT INTO scores (id, column_id, student_id, value, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(column_id, student_id)
+     DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, deleted_at=NULL`,
+    [db.newId(), columnId, studentId, value, now, now]
   );
+}
+
+export async function upsertScore(columnId, studentId, value) {
+  upsertOne(columnId, studentId, value);
 }
 
 export async function bulkUpsertScores(entries) {
   if (!entries || entries.length === 0) return;
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
+  db.transaction(() => {
     for (const { column_id, student_id, value } of entries) {
-      if (value === null || value === undefined || value === '') {
-        await conn.query('DELETE FROM scores WHERE column_id = ? AND student_id = ?', [column_id, student_id]);
-      } else {
-        await conn.query(
-          `INSERT INTO scores (column_id, student_id, value) VALUES (?, ?, ?)
-           ON DUPLICATE KEY UPDATE value = VALUES(value)`,
-          [column_id, student_id, value]
-        );
-      }
+      upsertOne(column_id, student_id, value);
     }
-    await conn.commit();
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
 }

@@ -1,88 +1,127 @@
+-- Gradebook schema (SQLite).
+--
+-- Sync-ready design decisions:
+--  * TEXT UUID primary keys everywhere (two devices can create rows offline
+--    without id collisions).
+--  * created_at / updated_at ISO-8601 UTC strings on every table; updated_at
+--    is the last-write-wins ordering key for sync merges.
+--  * deleted_at tombstones: rows are soft-deleted (with cascade in the query
+--    layer) so deletions propagate through sync instead of resurrecting.
+--  * owner_device_id records which installation created a subject / group —
+--    an advisory label, not a permission system.
+--
+-- Dates (assessment_columns.date) are plain 'YYYY-MM-DD' strings end-to-end.
+
 CREATE TABLE IF NOT EXISTS subjects (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  section VARCHAR(100) NOT NULL,
-  school_year VARCHAR(20) NOT NULL,
-  semester VARCHAR(50) NOT NULL,
-  prelim_weight DECIMAL(5,2) NOT NULL DEFAULT 30.00,
-  midterm_weight DECIMAL(5,2) NOT NULL DEFAULT 30.00,
-  final_weight DECIMAL(5,2) NOT NULL DEFAULT 40.00,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  section TEXT NOT NULL,
+  school_year TEXT NOT NULL,
+  semester TEXT NOT NULL,
+  prelim_weight REAL NOT NULL DEFAULT 30,
+  midterm_weight REAL NOT NULL DEFAULT 30,
+  final_weight REAL NOT NULL DEFAULT 40,
+  owner_device_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS students (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  subject_id INT NOT NULL,
-  last_name VARCHAR(100) NOT NULL,
-  first_name VARCHAR(100) NOT NULL,
-  middle_name VARCHAR(100) DEFAULT '',
-  sort_order INT NOT NULL DEFAULT 0,
-  FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+  last_name TEXT NOT NULL,
+  first_name TEXT NOT NULL,
+  middle_name TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_students_subject ON students(subject_id);
 
 CREATE TABLE IF NOT EXISTS grading_periods (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  subject_id INT NOT NULL,
-  type ENUM('PRELIM','MIDTERM','FINAL') NOT NULL,
-  UNIQUE KEY uq_subject_period (subject_id, type),
-  FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('PRELIM','MIDTERM','FINAL')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  UNIQUE (subject_id, type)
 );
+CREATE INDEX IF NOT EXISTS idx_periods_subject ON grading_periods(subject_id);
 
 CREATE TABLE IF NOT EXISTS assessments (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  period_id INT NOT NULL,
-  name VARCHAR(150) NOT NULL,
-  is_exam TINYINT(1) NOT NULL DEFAULT 0,
-  sort_order INT NOT NULL DEFAULT 0,
-  weight_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
-  FOREIGN KEY (period_id) REFERENCES grading_periods(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  period_id TEXT NOT NULL REFERENCES grading_periods(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  is_exam INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  weight_percent REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_assessments_period ON assessments(period_id);
 
 CREATE TABLE IF NOT EXISTS assessment_columns (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  assessment_id INT NOT NULL,
-  date DATE DEFAULT NULL,
-  max_score DECIMAL(8,2) NOT NULL DEFAULT 100.00,
-  sort_order INT NOT NULL DEFAULT 0,
-  FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+  date TEXT,
+  max_score REAL NOT NULL DEFAULT 100,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_columns_assessment ON assessment_columns(assessment_id);
 
 CREATE TABLE IF NOT EXISTS scores (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  column_id INT NOT NULL,
-  student_id INT NOT NULL,
-  value DECIMAL(8,2) DEFAULT NULL,
-  UNIQUE KEY uq_col_student (column_id, student_id),
-  FOREIGN KEY (column_id) REFERENCES assessment_columns(id) ON DELETE CASCADE,
-  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  column_id TEXT NOT NULL REFERENCES assessment_columns(id) ON DELETE CASCADE,
+  student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  value REAL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  UNIQUE (column_id, student_id)
 );
+CREATE INDEX IF NOT EXISTS idx_scores_student ON scores(student_id);
 
 CREATE TABLE IF NOT EXISTS attendance_config (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  period_id INT NOT NULL,
-  present_score DECIMAL(8,2) NOT NULL DEFAULT 10.00,
-  late_score DECIMAL(8,2) NOT NULL DEFAULT 8.00,
-  absent_score DECIMAL(8,2) NOT NULL DEFAULT 0.00,
-  UNIQUE KEY uq_period (period_id),
-  FOREIGN KEY (period_id) REFERENCES grading_periods(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  period_id TEXT NOT NULL REFERENCES grading_periods(id) ON DELETE CASCADE,
+  present_score REAL NOT NULL DEFAULT 10,
+  late_score REAL NOT NULL DEFAULT 8,
+  absent_score REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  UNIQUE (period_id)
 );
 
 -- Student Groups: reusable rosters independent from any subject.
 -- Importing a group into a subject COPIES the students, so gradebooks stay
 -- independent even if the group changes later.
 CREATE TABLE IF NOT EXISTS student_groups (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  description VARCHAR(500) NOT NULL DEFAULT '',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  owner_device_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS group_students (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  group_id INT NOT NULL,
-  last_name VARCHAR(100) NOT NULL,
-  first_name VARCHAR(100) NOT NULL,
-  middle_name VARCHAR(100) NOT NULL DEFAULT '',
-  sort_order INT NOT NULL DEFAULT 0,
-  FOREIGN KEY (group_id) REFERENCES student_groups(id) ON DELETE CASCADE
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES student_groups(id) ON DELETE CASCADE,
+  last_name TEXT NOT NULL,
+  first_name TEXT NOT NULL,
+  middle_name TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_group_students_group ON group_students(group_id);

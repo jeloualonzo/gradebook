@@ -1,54 +1,38 @@
-import pool from '@/lib/db';
 import ExcelJS from 'exceljs';
-import { computePeriodGrade, computeFinalSubjectGrade, formatGrade } from '@/lib/gradeCalculator';
+import { computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { formatDateMMDDYYYY } from '@/lib/dateUtils';
+import { getSubjectById } from '@/lib/queries/subjects';
+import { getStudentsBySubject } from '@/lib/queries/students';
+import { getPeriodsBySubject, getAssessmentsByPeriod, getColumnsByAssessment } from '@/lib/queries/assessments';
+import { getScoresBySubject } from '@/lib/queries/scores';
+
+async function loadSubjectData(subjectId) {
+  const subject = await getSubjectById(subjectId);
+  if (!subject) return null;
+  const students = await getStudentsBySubject(subjectId);
+  const periods = await getPeriodsBySubject(subjectId);
+  for (const period of periods) {
+    const assessments = await getAssessmentsByPeriod(period.id);
+    for (const a of assessments) {
+      a.columns = await getColumnsByAssessment(a.id);
+    }
+    period.assessments = assessments;
+  }
+  const scoreRows = await getScoresBySubject(subjectId);
+  const scores = {};
+  for (const row of scoreRows) {
+    if (!scores[row.column_id]) scores[row.column_id] = {};
+    scores[row.column_id][row.student_id] = row.value;
+  }
+  return { subject, students, periods, scores };
+}
 
 export async function GET(request, { params }) {
   try {
     const resolvedParams = await params;
-    const subjectId = resolvedParams.id;
-
-    const [[subject]] = await pool.query('SELECT * FROM subjects WHERE id = ?', [subjectId]);
-    if (!subject) return Response.json({ error: 'Not found' }, { status: 404 });
-
-    const [students] = await pool.query(
-      'SELECT * FROM students WHERE subject_id = ? ORDER BY last_name, first_name, middle_name',
-      [subjectId]
-    );
-
-    const [periods] = await pool.query(
-      'SELECT * FROM grading_periods WHERE subject_id = ? ORDER BY FIELD(type,"PRELIM","MIDTERM","FINAL")',
-      [subjectId]
-    );
-
-    for (const period of periods) {
-      const [assessments] = await pool.query(
-        'SELECT * FROM assessments WHERE period_id = ? ORDER BY is_exam, sort_order',
-        [period.id]
-      );
-      for (const a of assessments) {
-        const [cols] = await pool.query(
-          'SELECT * FROM assessment_columns WHERE assessment_id = ? ORDER BY date',
-          [a.id]
-        );
-        a.columns = cols;
-      }
-      period.assessments = assessments;
-    }
-
-    const [scoreRows] = await pool.query(
-      `SELECT s.column_id, s.student_id, s.value FROM scores s
-       JOIN assessment_columns ac ON ac.id = s.column_id
-       JOIN assessments a ON a.id = ac.assessment_id
-       JOIN grading_periods gp ON gp.id = a.period_id
-       WHERE gp.subject_id = ?`,
-      [subjectId]
-    );
-    const scores = {};
-    for (const row of scoreRows) {
-      if (!scores[row.column_id]) scores[row.column_id] = {};
-      scores[row.column_id][row.student_id] = row.value;
-    }
+    const data = await loadSubjectData(resolvedParams.id);
+    if (!data) return Response.json({ error: 'Not found' }, { status: 404 });
+    const { subject, students, periods, scores } = data;
 
     const workbook = new ExcelJS.Workbook();
     const ws = workbook.addWorksheet(`${subject.name} - ${subject.section}`);

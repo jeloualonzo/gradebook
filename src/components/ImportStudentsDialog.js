@@ -45,7 +45,7 @@ export default function ImportStudentsDialog({ open, onClose, subjectId, onImpor
       const res = await fetch(`/api/subjects/${subjectId}/import-students`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groupId: Number(groupId), skipDuplicates }),
+        body: JSON.stringify({ groupId, skipDuplicates }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Import failed');

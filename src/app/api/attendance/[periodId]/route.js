@@ -1,6 +1,5 @@
 import { upsertAttendanceConfig, getAttendanceConfig } from '@/lib/queries/assessments';
 import { bulkUpsertScores } from '@/lib/queries/scores';
-import pool from '@/lib/db';
 
 export async function GET(request, { params }) {
   try {

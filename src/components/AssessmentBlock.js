@@ -108,7 +108,7 @@ function AssessmentBlock({
   const restoreScores = async (columnId, columnScores) => {
     const entries = Object.entries(columnScores || {}).map(([sid, v]) => ({
       column_id: columnId,
-      student_id: Number(sid),
+      student_id: sid, // ids are UUID strings
       value: v,
     }));
     if (entries.length) {

@@ -1,50 +1,59 @@
-import pool from '@/lib/db';
+import db from '@/lib/db';
 
 export async function getStudentsBySubject(subjectId) {
   // Students are ALWAYS presented alphabetically (last, first, middle name)
   // everywhere in the app so instructors can locate them instantly.
-  const [rows] = await pool.query(
-    'SELECT * FROM students WHERE subject_id = ? ORDER BY last_name, first_name, middle_name',
+  return db.all(
+    `SELECT * FROM students
+     WHERE subject_id = ? AND deleted_at IS NULL
+     ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
     [subjectId]
   );
-  return rows;
 }
 
 export async function createStudent(subjectId, { last_name, first_name, middle_name = '' }) {
-  const [[{ maxOrder }]] = await pool.query(
-    'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM students WHERE subject_id = ?',
+  const { maxOrder } = db.get(
+    'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM students WHERE subject_id = ? AND deleted_at IS NULL',
     [subjectId]
   );
-  const [result] = await pool.query(
-    'INSERT INTO students (subject_id, last_name, first_name, middle_name, sort_order) VALUES (?, ?, ?, ?, ?)',
-    [subjectId, last_name, first_name, middle_name, maxOrder + 1]
+  const id = db.newId();
+  const now = db.now();
+  db.run(
+    `INSERT INTO students (id, subject_id, last_name, first_name, middle_name, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, subjectId, last_name, first_name, middle_name || '', maxOrder + 1, now, now]
   );
-  return result.insertId;
+  return id;
 }
 
 export async function updateStudent(id, { last_name, first_name, middle_name = '' }) {
-  await pool.query(
-    'UPDATE students SET last_name=?, first_name=?, middle_name=? WHERE id=?',
-    [last_name, first_name, middle_name, id]
+  db.run(
+    'UPDATE students SET last_name=?, first_name=?, middle_name=?, updated_at=? WHERE id=?',
+    [last_name, first_name, middle_name || '', db.now(), id]
   );
 }
 
 export async function deleteStudent(id) {
-  await pool.query('DELETE FROM students WHERE id = ?', [id]);
+  // Soft delete (tombstone) the student and their scores so the deletion
+  // propagates through sync instead of resurrecting on merge.
+  const now = db.now();
+  db.transaction(() => {
+    db.run(
+      'UPDATE scores SET deleted_at=?, updated_at=? WHERE student_id=? AND deleted_at IS NULL',
+      [now, now, id]
+    );
+    db.run('UPDATE students SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, id]);
+  });
 }
 
 export async function reorderStudents(orderedIds) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
+  const now = db.now();
+  db.transaction(() => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await conn.query('UPDATE students SET sort_order = ? WHERE id = ?', [i, orderedIds[i]]);
+      db.run(
+        'UPDATE students SET sort_order=?, updated_at=? WHERE id=? AND sort_order != ?',
+        [i, now, orderedIds[i], i]
+      );
     }
-    await conn.commit();
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
 }

@@ -83,7 +83,7 @@ function NewSubjectContent() {
       await fetch(`/api/subjects/${id}/import-students`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groupId: Number(groupId), skipDuplicates: false }),
+        body: JSON.stringify({ groupId, skipDuplicates: false }),
       });
     }
     setCreatedId(id);
