@@ -23,12 +23,39 @@ const standalone = path.join(root, '.next', 'standalone');
 const run = (cmd, args, opts = {}) => {
   console.log(`\n→ ${cmd} ${args.join(' ')}`);
   const res = spawnSync(cmd, args, { stdio: 'inherit', ...opts });
+  if (res.error) {
+    console.error(`Step failed to start: ${res.error.message}`);
+    process.exit(1);
+  }
   if (res.status !== 0) {
-    console.error(`Step failed (${cmd} ${args.join(' ')}), exit ${res.status}`);
+    console.error(`Step failed (${cmd} ${args.join(' ')}), exit ${res.status ?? `signal ${res.signal}`}`);
     process.exit(res.status ?? 1);
   }
 };
 const node = process.execPath;
+
+// Electron's postinstall sometimes fails silently (npm still reports success),
+// leaving node_modules/electron without the actual binary. Detect and repair.
+function ensureElectronBinary() {
+  const bin = path.join(
+    root, 'node_modules', 'electron', 'dist',
+    process.platform === 'win32' ? 'electron.exe' : 'electron'
+  );
+  if (!fs.existsSync(bin)) {
+    console.log('\n→ electron binary is missing — running its installer');
+    run(node, [path.join(root, 'node_modules', 'electron', 'install.js')], {
+      cwd: path.join(root, 'node_modules', 'electron'),
+    });
+  }
+  if (!fs.existsSync(bin)) {
+    console.error(
+      'The Electron binary is still missing after reinstall.\n' +
+      'Try: npm install electron --force   (then re-run this build)'
+    );
+    process.exit(1);
+  }
+  return bin;
+}
 
 // 1. Standalone Next build (from a clean slate) --------------------------------
 fs.rmSync(standalone, { recursive: true, force: true });
@@ -76,18 +103,19 @@ const fetchPrebuild = (platform) => {
 
 // Host pass + real boot verification under Electron's Node runtime.
 fetchPrebuild(process.platform);
-const electronBin = path.join(
-  root, 'node_modules', 'electron', 'dist',
-  process.platform === 'win32' ? 'electron.exe' : 'electron'
-);
+const electronBin = ensureElectronBinary();
 console.log('\n→ verifying the bundled binary loads under Electron');
-run(electronBin, ['-e', `
+// A script FILE (not -e) — robust across Windows quoting/newline handling.
+const verifyPath = path.join(standalone, '.verify-sqlite.cjs');
+fs.writeFileSync(verifyPath, `
   const Database = require(${JSON.stringify(bundledSqlite)});
   const db = new Database(':memory:');
   db.exec('CREATE TABLE t(id TEXT)');
   db.prepare('INSERT INTO t VALUES (?)').run('ok');
   console.log('better-sqlite3 under Electron ABI: OK,', db.prepare('SELECT COUNT(*) c FROM t').get().c, 'row');
-`], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+`);
+run(electronBin, [verifyPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+fs.rmSync(verifyPath);
 
 // Target pass: the binary that ships inside the installer. Only the full
 // Windows packaging run swaps in the win32 binary; --dir and --no-pack keep

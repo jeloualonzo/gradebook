@@ -28,8 +28,11 @@ db.pragma('busy_timeout = 5000');
 
 // Bootstrap / upgrade schema. In the packaged desktop app the schema file
 // lives next to the bundled server, located via GRADEBOOK_SCHEMA_PATH.
+// (turbopackIgnore keeps the tracer from pulling the whole project into the
+// standalone bundle because of this dynamic path.)
 const schemaPath =
-  process.env.GRADEBOOK_SCHEMA_PATH || path.join(process.cwd(), 'src/lib/schema.sql');
+  process.env.GRADEBOOK_SCHEMA_PATH ||
+  path.join(/* turbopackIgnore: true */ process.cwd(), 'src/lib/schema.sql');
 db.exec(fs.readFileSync(schemaPath, 'utf8'));
 if (db.pragma('user_version', { simple: true }) < SCHEMA_VERSION) {
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
