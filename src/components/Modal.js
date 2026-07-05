@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export default function Modal({ open, onClose, title, children, width = 'max-w-lg' }) {
   const ref = useRef(null);
@@ -12,8 +13,15 @@ export default function Modal({ open, onClose, title, children, width = 'max-w-l
   }, [open, onClose]);
 
   if (!open) return null;
+  // Modals open only via user interaction, so document always exists here —
+  // this guard just keeps server rendering safe.
+  if (typeof document === 'undefined') return null;
 
-  return (
+  // Rendered through a PORTAL to <body>: a modal can be triggered from
+  // anywhere — including inside table rows (e.g. the delete-column dialog in
+  // the gradebook header) — without producing invalid HTML like a <div>
+  // inside <tr>, which breaks hydration in React 19.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
         className="absolute inset-0 bg-black/40"
@@ -38,6 +46,7 @@ export default function Modal({ open, onClose, title, children, width = 'max-w-l
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
