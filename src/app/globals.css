@@ -2,6 +2,9 @@
 
 :root {
   --font-inter: 'Inter', sans-serif;
+  /* Vertical grid lines between assessment columns (Excel-like, but clean).
+     ONE place to tweak the whole grid's column separation. */
+  --gb-column-line: #cbd5e1;
 }
 
 * {
@@ -40,9 +43,13 @@ input[type="number"] {
   table-layout: fixed;
 }
 
+/* Column separators are slightly darker than row lines so each date/score
+   column reads as its own unit at a glance (see --gb-column-line). */
 .gradebook-table th,
 .gradebook-table td {
   border: 1px solid #e5e7eb;
+  border-left-color: var(--gb-column-line);
+  border-right-color: var(--gb-column-line);
 }
 
 .gradebook-table .sticky-col {
@@ -135,6 +142,16 @@ input[type="number"] {
 .gradebook-table tbody tr:focus-within td.sticky-col {
   color: #2563eb;
   font-weight: 700;
+}
+
+/* --- Active-column indication ----------------------------------------------
+   While a cell of an assessment column is FOCUSED (score, date, or max),
+   that column's Date + Max header cells get a subtle tint and a bottom
+   accent — enough to see which column you're editing, nothing more.
+   Applied imperatively from GradebookTable (focus events), never on hover. */
+.gradebook-table th.col-active {
+  background-color: #eff6ff;
+  box-shadow: inset 0 -2px 0 #3b82f6;
 }
 
 .period-header {

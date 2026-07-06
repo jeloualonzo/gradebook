@@ -516,6 +516,7 @@ function AssessmentBlock({
         {assessment.columns.map(col => (
           <th
             key={col.id}
+            data-col-head={col.id}
             className="relative border-r border-gray-200 px-1 py-0.5 text-center"
             onContextMenu={e => onOpenMenu?.(e, columnMenuItems(col))}
           >
@@ -573,6 +574,7 @@ function AssessmentBlock({
         {assessment.columns.map(col => (
           <th
             key={col.id}
+            data-col-head={col.id}
             className="border-r border-gray-200 px-1 py-0.5 text-center"
             onContextMenu={e => onOpenMenu?.(e, columnMenuItems(col))}
           >

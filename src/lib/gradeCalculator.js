@@ -43,40 +43,6 @@ export function computePeriodGrade(assessments, scores, studentId) {
 }
 
 /**
- * Computes the final subject grade for a student.
- *
- * @param {Object} periodGrades - { PRELIM: number|null, MIDTERM: number|null, FINAL: number|null }
- * @param {Object} subject - { prelim_weight, midterm_weight, final_weight }
- * @returns {number|null}
- */
-export function computeFinalGrade(periodGrades, subject) {
-  const pw = parseFloat(subject.prelim_weight) || 0;
-  const mw = parseFloat(subject.midterm_weight) || 0;
-  const fw = parseFloat(subject.final_weight) || 0;
-  const totalW = pw + mw + fw;
-  if (totalW === 0) return null;
-
-  let sum = 0;
-  let usedWeight = 0;
-
-  if (periodGrades.PRELIM !== null && periodGrades.PRELIM !== undefined) {
-    sum += periodGrades.PRELIM * (pw / totalW);
-    usedWeight += pw;
-  }
-  if (periodGrades.MIDTERM !== null && periodGrades.MIDTERM !== undefined) {
-    sum += periodGrades.MIDTERM * (mw / totalW);
-    usedWeight += mw;
-  }
-  if (periodGrades.FINAL !== null && periodGrades.FINAL !== undefined) {
-    sum += periodGrades.FINAL * (fw / totalW);
-    usedWeight += fw;
-  }
-
-  if (usedWeight === 0) return null;
-  return (sum / usedWeight) * usedWeight + sum * (1 - usedWeight / totalW);
-}
-
-/**
  * Computes grades for all students across all periods for a subject.
  *
  * @param {Object} gradebookData - { subject, periods: [{ type, assessments: [...] }], scores }

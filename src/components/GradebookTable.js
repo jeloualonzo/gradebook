@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import React from 'react';
 import ScoreCell from './ScoreCell';
 import ContextMenu from './ContextMenu';
@@ -55,6 +55,34 @@ export default function GradebookTable({
     setMenu({ x: event.clientX, y: event.clientY, items });
   }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  // --- Active-column indication ---------------------------------------------
+  // When a cell of an assessment column is FOCUSED (score / date / max), that
+  // column's Date + Max header cells get the .col-active class. Done with
+  // direct DOM class toggling (like the keyboard navigation) so a focus move
+  // never re-renders the memoized grid.
+  const gridRef = useRef(null);
+  const markActiveColumn = useCallback((colId) => {
+    const root = gridRef.current;
+    if (!root) return;
+    for (const el of root.querySelectorAll('th.col-active')) el.classList.remove('col-active');
+    if (colId) {
+      for (const el of root.querySelectorAll(`th[data-col-head="${colId}"]`)) el.classList.add('col-active');
+    }
+  }, []);
+  const handleGridFocus = useCallback((e) => {
+    // Score inputs carry data-col; date/max header cells carry data-col-head.
+    const holder = e.target.closest?.('[data-col], [data-col-head]');
+    markActiveColumn(holder?.getAttribute('data-col') || holder?.getAttribute('data-col-head') || null);
+  }, [markActiveColumn]);
+  const handleGridBlur = useCallback(() => {
+    // Clear only when focus truly left the grid (moving between cells fires
+    // a focus event right after this, which re-marks the new column).
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!gridRef.current || !active || !gridRef.current.contains(active)) markActiveColumn(null);
+    });
+  }, [markActiveColumn]);
 
   const handleAddAssessment = async (periodId) => {
     const name = newAssessmentName.trim();
@@ -155,7 +183,7 @@ export default function GradebookTable({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-    <div className="overflow-x-auto w-full">
+    <div ref={gridRef} className="overflow-x-auto w-full" onFocusCapture={handleGridFocus} onBlurCapture={handleGridBlur}>
       <table className="gradebook-table w-max text-xs">
         {/*
           Explicit column widths (table-layout: fixed). Every assessment
