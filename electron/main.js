@@ -196,6 +196,12 @@ async function start() {
     return result.canceled ? null : result.filePaths[0];
   });
 
+  // Open the automatic-backups folder in Explorer (Settings → Backups).
+  ipcMain.handle('gradebook:open-backups', async () => {
+    fs.mkdirSync(backupsDir, { recursive: true });
+    return shell.openPath(backupsDir);
+  });
+
   // Sync lifecycle (all no-ops until a sync folder is configured; failures
   // only log — the gradebook never waits on sync):
   //  · on launch:   pick up the other laptop's work before you start

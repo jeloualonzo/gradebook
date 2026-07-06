@@ -89,7 +89,7 @@ run(node, [path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'buil
 // could not statically resolve. The schema is a static import now, but if any
 // future code reintroduces a dynamic fs read, fail LOUDLY here instead of
 // silently shipping a 1.5 GB installer.
-for (const junk of ['data', 'src', 'scripts', 'dist', 'electron', 'build', 'README.md']) {
+for (const junk of ['data', 'backups', 'src', 'scripts', 'dist', 'electron', 'build', 'README.md']) {
   if (fs.existsSync(path.join(standalone, junk))) {
     console.error(
       `Refusing to continue: "${junk}" was traced into the standalone bundle.\n` +
