@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS subjects (
   owner_device_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  deleted_at TEXT
+  deleted_at TEXT,
+  purged_at TEXT,              -- "permanently deleted": hidden from the recycle bin (still synced as a tombstone)
+  deleted_by_device_id TEXT    -- which laptop deleted it (recycle-bin display)
 );
 
 CREATE TABLE IF NOT EXISTS students (
@@ -125,7 +127,9 @@ CREATE TABLE IF NOT EXISTS student_groups (
   owner_device_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  deleted_at TEXT
+  deleted_at TEXT,
+  purged_at TEXT,              -- "permanently deleted": hidden from the recycle bin (still synced as a tombstone)
+  deleted_by_device_id TEXT    -- which laptop deleted it (recycle-bin display)
 );
 
 CREATE TABLE IF NOT EXISTS group_students (

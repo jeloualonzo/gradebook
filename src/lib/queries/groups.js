@@ -50,8 +50,43 @@ export async function deleteGroup(id) {
   const now = db.now();
   db.transaction(() => {
     db.run('UPDATE group_students SET deleted_at=?, updated_at=? WHERE group_id=? AND deleted_at IS NULL', [now, now, id]);
-    db.run('UPDATE student_groups SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, id]);
+    db.run(
+      'UPDATE student_groups SET deleted_at=?, updated_at=?, deleted_by_device_id=? WHERE id=? AND deleted_at IS NULL',
+      [now, now, db.getDeviceId(), id]
+    );
   });
+}
+
+/** Recycle bin: tombstoned groups that were not permanently deleted. */
+export async function getDeletedGroups() {
+  return db.all(`
+    SELECT g.*,
+      (SELECT COUNT(*) FROM group_students gs WHERE gs.group_id = g.id AND gs.deleted_at = g.deleted_at) AS member_count
+    FROM student_groups g
+    WHERE g.deleted_at IS NOT NULL AND g.purged_at IS NULL
+    ORDER BY g.deleted_at DESC`);
+}
+
+/** Restore a deleted group with the members that were deleted WITH it. */
+export async function restoreGroup(id) {
+  db.transaction(() => {
+    const row = db.get('SELECT * FROM student_groups WHERE id = ? AND deleted_at IS NOT NULL', [id]);
+    if (!row) throw new Error('This group is not in the recycle bin.');
+    const ts = row.deleted_at;
+    const now = db.now();
+    db.run('UPDATE group_students SET deleted_at=NULL, updated_at=? WHERE group_id=? AND deleted_at = ?', [now, id, ts]);
+    db.run('UPDATE student_groups SET deleted_at=NULL, purged_at=NULL, deleted_by_device_id=NULL, updated_at=? WHERE id=?', [now, id]);
+  });
+}
+
+/** Permanently delete (synced tombstone stays; hidden from the bin). */
+export async function purgeGroup(id) {
+  const now = db.now();
+  const info = db.run(
+    'UPDATE student_groups SET purged_at=?, updated_at=? WHERE id=? AND deleted_at IS NOT NULL',
+    [now, now, id]
+  );
+  if (info.changes === 0) throw new Error('This group is not in the recycle bin.');
 }
 
 export async function duplicateGroup(id) {

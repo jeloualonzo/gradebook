@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -49,6 +49,21 @@ export const MIGRATIONS = {
       );
       CREATE INDEX IF NOT EXISTS idx_sync_conflicts_resolved ON sync_conflicts(resolved_at);
     `);
+  },
+
+  // v3 — recycle bin support on the two top-level deletable things:
+  //   purged_at             "permanently deleted": still a synced tombstone
+  //                         (hard-deleting rows would break snapshot sync),
+  //                         but hidden from the recycle bin forever.
+  //   deleted_by_device_id  which laptop performed the deletion (display).
+  // Both columns are synced (see engine.mjs SYNCED_TABLES + snapshot
+  // schema_version bump), NULLable, and additive.
+  3: (db) => {
+    for (const table of ['subjects', 'student_groups']) {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+      if (!cols.includes('purged_at')) db.exec(`ALTER TABLE ${table} ADD COLUMN purged_at TEXT`);
+      if (!cols.includes('deleted_by_device_id')) db.exec(`ALTER TABLE ${table} ADD COLUMN deleted_by_device_id TEXT`);
+    }
   },
 };
 

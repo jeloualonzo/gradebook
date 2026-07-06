@@ -34,6 +34,33 @@ let quitSyncDone = false;
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // periodic push/pull while the app is open
 
+// Cold starts are dominated by Windows re-reading thousands of server files
+// from disk (often while the antivirus rescans them) — observed 6–15s on a
+// real machine, potentially worse under load. The loading window below gives
+// instant feedback; this timeout only cuts off genuinely broken starts.
+const SERVER_START_TIMEOUT_MS = 90000;
+
+/** Tiny window shown IMMEDIATELY on launch, replaced by the app when ready. */
+function createLoadingWindow() {
+  const w = new BrowserWindow({
+    width: 360,
+    height: 190,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    title: 'Gradebook',
+  });
+  w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html>
+    <html><body style="font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:96vh;margin:0;color:#374151;background:#f9fafb">
+      <div style="width:28px;height:28px;border:3px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;animation:s 1s linear infinite"></div>
+      <p style="font-size:13px;font-weight:500;margin:14px 0 0">Starting Gradebook…</p>
+      <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">The first open after a while can take a minute</p>
+      <style>@keyframes s{to{transform:rotate(360deg)}}</style>
+    </body></html>`));
+  return w;
+}
+
 /**
  * Ask the local server to run one sync pass. Resolves with the response body
  * (or null on error/timeout) — NEVER rejects, so callers can fire-and-forget.
@@ -77,6 +104,10 @@ function log(line) {
 }
 
 async function start() {
+  // Instant feedback: this window appears the moment the app launches and is
+  // replaced by the gradebook once the server answers.
+  const loadingWindow = createLoadingWindow();
+
   const userData = app.getPath('userData');
   const dataDir = path.join(userData, 'data');
   const backupsDir = path.join(userData, 'backups');
@@ -84,6 +115,7 @@ async function start() {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(logsDir, { recursive: true });
   logStream = fs.createWriteStream(path.join(logsDir, 'server.log'), { flags: 'a' });
+  const closeLoading = () => { try { if (!loadingWindow.isDestroyed()) loadingWindow.close(); } catch { /* gone */ } };
 
   // Automatic backup BEFORE the server opens the database.
   try {
@@ -99,11 +131,13 @@ async function start() {
     : path.join(__dirname, '..', '.next', 'standalone');
   const serverJs = path.join(serverRoot, 'server.js');
   if (!fs.existsSync(serverJs)) {
+    closeLoading();
     fatal(`Server bundle not found at:\n${serverJs}\n\nBuild it first: npm run desktop:build`);
     return;
   }
 
   const port = await findFreePort();
+  const bootStartedAt = Date.now();
   log(`Starting server from ${serverRoot} on port ${port}`);
 
   serverProc = utilityProcess.fork(serverJs, [], {
@@ -126,11 +160,18 @@ async function start() {
     }
   });
 
-  const ready = await waitForHttp(`http://127.0.0.1:${port}/`, 25000);
+  const ready = await waitForHttp(`http://127.0.0.1:${port}/`, SERVER_START_TIMEOUT_MS);
   if (!ready) {
-    fatal(`The gradebook server did not start in time.\nSee logs at: ${path.join(logsDir, 'server.log')}`);
+    closeLoading();
+    fatal(
+      'The gradebook server did not start within 90 seconds.\n\n' +
+      'This is usually a one-off (a very slow cold start, often the antivirus scanning the app) — ' +
+      'try opening Gradebook again.\n\n' +
+      `If it keeps happening, send the log file:\n${path.join(logsDir, 'server.log')}`
+    );
     return;
   }
+  log(`Server ready after ${Date.now() - bootStartedAt}ms`);
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -144,6 +185,7 @@ async function start() {
     },
   });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  closeLoading(); // the real window is up — retire the splash
 
   // Native folder picker for the sync settings dialog.
   ipcMain.handle('gradebook:pick-folder', async () => {

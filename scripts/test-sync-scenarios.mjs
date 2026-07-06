@@ -166,5 +166,48 @@ check('LOG: S6b entry says kept 6, replaced 5', s6bLog?.kept === '6');
 check('LOG: entries carry readable context (student + assessment)',
   !!s6aLog && /Score of Uno, Alpha/.test(s6aLog.label) && /Quiz/.test(s6aLog.label));
 
+// ---------- S9: recycle bin across laptops ----------
+// Delete on A → B sees it gone AND in its bin; restore on B → A gets it back
+// with every score; permanent delete propagates; no duplicates anywhere.
+// updated_at changes on restore BY DESIGN (the revival must win in sync),
+// so compare everything except volatile bookkeeping fields.
+const stripVolatile = (o) => JSON.parse(JSON.stringify(o), (k, v) =>
+  (k === 'updated_at' || k === 'deleted_by_device_id' || k === 'purged_at' ? undefined : v));
+const preDelete = JSON.stringify(stripVolatile({
+  students: await must(A, 'GET', `/api/subjects/${subj}/students`),
+  scores: await scores(A, subj),
+}));
+await must(A, 'DELETE', `/api/subjects/${subj}`);
+await sync(A); await sync(B);
+check('S9: deletion propagates (gone from B main list)',
+  !(await must(B, 'GET', '/api/subjects')).some(s => s.id === subj));
+const binB = await must(B, 'GET', '/api/recycle-bin');
+check('S9: B recycle bin lists it with the deleting laptop',
+  binB.subjects.some(s => s.id === subj && s.deleted_by));
+
+await must(B, 'POST', `/api/subjects/${subj}/restore`);
+await sync(B); await sync(A);
+check('S9: restore on B propagates back to A',
+  (await must(A, 'GET', '/api/subjects')).some(s => s.id === subj));
+const postRestore = JSON.stringify(stripVolatile({
+  students: await must(A, 'GET', `/api/subjects/${subj}/students`),
+  scores: await scores(A, subj),
+}));
+check('S9: A has identical students + scores after the round trip', preDelete === postRestore);
+check('S9: no duplicates after restore',
+  (await must(A, 'GET', '/api/subjects')).filter(s => s.id === subj).length === 1 &&
+  (await must(B, 'GET', '/api/subjects')).filter(s => s.id === subj).length === 1);
+
+// Permanent-delete propagation via a group.
+const { id: grp } = await must(A, 'POST', '/api/groups', { name: 'Purge Me', description: '' });
+await sync(A); await sync(B);
+await must(A, 'DELETE', `/api/groups/${grp}`);
+await sync(A); await sync(B);
+check('S9: deleted group shows in B bin', (await must(B, 'GET', '/api/recycle-bin')).groups.some(g => g.id === grp));
+await must(A, 'POST', `/api/groups/${grp}/purge`);
+await sync(A); await sync(B);
+check('S9: permanent delete propagates (gone from B bin too)',
+  !(await must(B, 'GET', '/api/recycle-bin')).groups.some(g => g.id === grp));
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

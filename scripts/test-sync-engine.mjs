@@ -30,7 +30,8 @@ const subj = (over = {}) => ({
   id: 's1', name: 'BPM', section: 'X', school_year: '2026-2027', semester: '1st',
   prelim_weight: 30, midterm_weight: 30, final_weight: 40,
   owner_device_id: A, created_at: '2026-07-01T00:00:00.000Z',
-  updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null, ...over,
+  updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null,
+  purged_at: null, deleted_by_device_id: null, ...over,
 });
 
 // ---- 1. basic row rules -----------------------------------------------------
@@ -116,7 +117,7 @@ const applyDecisions = (state, decisions) => {
   stateA.subjects = [subj()];
   stateA.grading_periods = [{ id: 'p1', subject_id: 's1', type: 'PRELIM', created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null }];
   stateA.assessments = [{ id: 'a1', period_id: 'p1', name: 'Quiz', is_exam: 0, sort_order: 0, weight_percent: 50, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-05T00:00:00.000Z', deleted_at: null }];
-  stateA.student_groups = [{ id: 'g1', name: 'BSIS 2A', description: '', owner_device_id: A, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null }];
+  stateA.student_groups = [{ id: 'g1', name: 'BSIS 2A', description: '', owner_device_id: A, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null, purged_at: null, deleted_by_device_id: null }];
 
   const stateB = emptyState();
   stateB.subjects = [subj({ id: 's2', name: 'Ethics', owner_device_id: B })];

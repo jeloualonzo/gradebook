@@ -32,7 +32,8 @@ export const FORMAT_VERSION = 1;
 // (a device refuses snapshots from a newer shape and asks to be updated).
 // Independent from the database migration version in src/lib/migrations.js —
 // local-only tables (like sync_conflicts) never affect this number.
-export const SCHEMA_VERSION = 1;
+//   v2: purged_at + deleted_by_device_id on subjects/student_groups (recycle bin)
+export const SCHEMA_VERSION = 2;
 
 // Parents strictly before children (foreign-key safe application order).
 // `naturalKey` marks tables whose rows have an identity beyond their UUID —
@@ -40,7 +41,7 @@ export const SCHEMA_VERSION = 1;
 export const SYNCED_TABLES = [
   {
     name: 'subjects',
-    columns: ['id', 'name', 'section', 'school_year', 'semester', 'prelim_weight', 'midterm_weight', 'final_weight', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at'],
+    columns: ['id', 'name', 'section', 'school_year', 'semester', 'prelim_weight', 'midterm_weight', 'final_weight', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at', 'purged_at', 'deleted_by_device_id'],
   },
   {
     name: 'grading_periods',
@@ -71,7 +72,7 @@ export const SYNCED_TABLES = [
   },
   {
     name: 'student_groups',
-    columns: ['id', 'name', 'description', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at'],
+    columns: ['id', 'name', 'description', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at', 'purged_at', 'deleted_by_device_id'],
   },
   {
     name: 'group_students',
