@@ -146,12 +146,11 @@ input[type="number"] {
 
 /* --- Active-column indication ----------------------------------------------
    While a cell of an assessment column is FOCUSED (score, date, or max),
-   that column's Date + Max header cells get a subtle tint and a bottom
-   accent — enough to see which column you're editing, nothing more.
+   that column's Date + Max header cells get a subtle background tint —
+   enough to see which column you're editing, nothing more.
    Applied imperatively from GradebookTable (focus events), never on hover. */
 .gradebook-table th.col-active {
   background-color: #eff6ff;
-  box-shadow: inset 0 -2px 0 #3b82f6;
 }
 
 .period-header {
