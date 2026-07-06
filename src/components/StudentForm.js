@@ -2,14 +2,15 @@
 import { useState } from 'react';
 
 /**
- * Shared student name form (Last / First / Middle) used by both subject
- * students (StudentManager) and Student Group students.
+ * Shared student name form (Last / Suffix / First / Middle) used by both
+ * subject students (StudentManager) and Student Group students.
  */
 export default function StudentForm({ initial = {}, onSubmit, onCancel, loading }) {
   const [form, setForm] = useState({
     last_name: initial.last_name || '',
     first_name: initial.first_name || '',
     middle_name: initial.middle_name || '',
+    suffix: initial.suffix || '',
   });
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -17,9 +18,15 @@ export default function StudentForm({ initial = {}, onSubmit, onCancel, loading 
 
   return (
     <form onSubmit={e => { e.preventDefault(); onSubmit(form); }} className="space-y-3">
-      <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">Last Name</label>
-        <input className={inputClass} value={form.last_name} onChange={set('last_name')} required />
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="block text-xs font-medium text-gray-700 mb-1">Last Name</label>
+          <input className={inputClass} value={form.last_name} onChange={set('last_name')} required />
+        </div>
+        <div className="w-24">
+          <label className="block text-xs font-medium text-gray-700 mb-1">Suffix</label>
+          <input className={inputClass} value={form.suffix} onChange={set('suffix')} placeholder="Jr., III" />
+        </div>
       </div>
       <div>
         <label className="block text-xs font-medium text-gray-700 mb-1">First Name</label>

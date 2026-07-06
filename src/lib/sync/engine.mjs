@@ -33,7 +33,8 @@ export const FORMAT_VERSION = 1;
 // Independent from the database migration version in src/lib/migrations.js —
 // local-only tables (like sync_conflicts) never affect this number.
 //   v2: purged_at + deleted_by_device_id on subjects/student_groups (recycle bin)
-export const SCHEMA_VERSION = 2;
+//   v3: suffix on students/group_students (name suffixes: Jr., III, …)
+export const SCHEMA_VERSION = 3;
 
 // Parents strictly before children (foreign-key safe application order).
 // `naturalKey` marks tables whose rows have an identity beyond their UUID —
@@ -50,7 +51,7 @@ export const SYNCED_TABLES = [
   },
   {
     name: 'students',
-    columns: ['id', 'subject_id', 'last_name', 'first_name', 'middle_name', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
+    columns: ['id', 'subject_id', 'last_name', 'first_name', 'middle_name', 'suffix', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
   },
   {
     name: 'assessments',
@@ -76,7 +77,7 @@ export const SYNCED_TABLES = [
   },
   {
     name: 'group_students',
-    columns: ['id', 'group_id', 'last_name', 'first_name', 'middle_name', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
+    columns: ['id', 'group_id', 'last_name', 'first_name', 'middle_name', 'suffix', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
   },
 ];
 

@@ -5,6 +5,7 @@ import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Toast from '@/components/Toast';
 import StudentForm from '@/components/StudentForm';
+import { displayName, searchText } from '@/lib/names';
 import GroupForm from '@/components/GroupForm';
 import ExcelImportDialog from '@/components/ExcelImportDialog';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -41,7 +42,7 @@ function SortableStudentRow({ student, index, dragDisabled, onEdit, onDelete }) 
       </td>
       <td className="px-3 py-1.5 text-gray-400 text-xs w-10">{index + 1}</td>
       <td className="px-3 py-1.5 text-gray-800">
-        {student.last_name}, {student.first_name}{student.middle_name ? ` ${student.middle_name.charAt(0)}.` : ''}
+        {displayName(student)}
       </td>
       <td className="px-2 py-1.5 w-16">
         <div className="flex gap-1 justify-end">
@@ -111,7 +112,7 @@ export default function GroupDetailPage() {
   }, [id]);
 
   const filtered = students.filter(s =>
-    `${s.last_name} ${s.first_name} ${s.middle_name || ''}`.toLowerCase().includes(search.toLowerCase())
+    searchText(s).includes(search.toLowerCase())
   );
   const dragDisabled = search.trim() !== '';
 

@@ -4,6 +4,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Toast from '@/components/Toast';
 import { todayLocalISO, toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
+import { displayName } from '@/lib/names';
 
 const STATUS_OPTIONS = [
   { key: 'P', label: 'Present', color: 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200', activeColor: 'bg-green-600 text-white border-green-600' },
@@ -280,7 +281,7 @@ function AttendanceContent() {
               <div key={student.id} className="flex items-center px-5 py-2.5 gap-4 hover:bg-gray-50/50">
                 <span className="text-xs text-gray-400 w-6 shrink-0">{idx + 1}</span>
                 <span className="flex-1 text-sm text-gray-800">
-                  {student.last_name}, {student.first_name}
+                  {displayName(student)}
                   {student.middle_name ? ` ${student.middle_name.charAt(0)}.` : ''}
                 </span>
                 <div className="flex gap-1">

@@ -11,7 +11,7 @@ export async function getStudentsBySubject(subjectId) {
   );
 }
 
-export async function createStudent(subjectId, { last_name, first_name, middle_name = '' }) {
+export async function createStudent(subjectId, { last_name, first_name, middle_name = '', suffix = '' }) {
   const { maxOrder } = db.get(
     'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM students WHERE subject_id = ? AND deleted_at IS NULL',
     [subjectId]
@@ -19,17 +19,17 @@ export async function createStudent(subjectId, { last_name, first_name, middle_n
   const id = db.newId();
   const now = db.now();
   db.run(
-    `INSERT INTO students (id, subject_id, last_name, first_name, middle_name, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, subjectId, last_name, first_name, middle_name || '', maxOrder + 1, now, now]
+    `INSERT INTO students (id, subject_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, subjectId, last_name, first_name, middle_name || '', suffix || '', maxOrder + 1, now, now]
   );
   return id;
 }
 
-export async function updateStudent(id, { last_name, first_name, middle_name = '' }) {
+export async function updateStudent(id, { last_name, first_name, middle_name = '', suffix = '' }) {
   db.run(
-    'UPDATE students SET last_name=?, first_name=?, middle_name=?, updated_at=? WHERE id=?',
-    [last_name, first_name, middle_name || '', db.now(), id]
+    'UPDATE students SET last_name=?, first_name=?, middle_name=?, suffix=?, updated_at=? WHERE id=?',
+    [last_name, first_name, middle_name || '', suffix || '', db.now(), id]
   );
 }
 

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { displayName, searchText } from '@/lib/names';
 import Modal from './Modal';
 import ConfirmDialog from './ConfirmDialog';
 import StudentForm from './StudentForm';
@@ -12,7 +13,7 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
   const [search, setSearch] = useState('');
 
   const filtered = students.filter(s =>
-    `${s.last_name} ${s.first_name}`.toLowerCase().includes(search.toLowerCase())
+    searchText(s).includes(search.toLowerCase())
   );
 
   const handleAdd = async (form) => {
@@ -84,7 +85,7 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
                 <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-3 py-1.5 text-gray-400 text-xs">{i + 1}</td>
                   <td className="px-3 py-1.5 text-gray-800">
-                    {s.last_name}, {s.first_name}{s.middle_name ? ` ${s.middle_name.charAt(0)}.` : ''}
+                    {displayName(s)}
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="flex gap-1 justify-end">
@@ -122,7 +123,7 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         title="Remove Student"
-        message={deleteTarget ? `Remove ${deleteTarget.last_name}, ${deleteTarget.first_name}? Their scores will be deleted.` : ''}
+        message={deleteTarget ? `Remove ${displayName(deleteTarget)}? Their scores will be deleted.` : ''}
       />
     </div>
   );

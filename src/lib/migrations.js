@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -63,6 +63,15 @@ export const MIGRATIONS = {
       const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
       if (!cols.includes('purged_at')) db.exec(`ALTER TABLE ${table} ADD COLUMN purged_at TEXT`);
       if (!cols.includes('deleted_by_device_id')) db.exec(`ALTER TABLE ${table} ADD COLUMN deleted_by_device_id TEXT`);
+    }
+  },
+
+  // v4 — name suffix (Jr., Sr., II, III …) on students and group members.
+  // A dedicated column: displayed after the name, never part of sorting.
+  4: (db) => {
+    for (const table of ['students', 'group_students']) {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+      if (!cols.includes('suffix')) db.exec(`ALTER TABLE ${table} ADD COLUMN suffix TEXT NOT NULL DEFAULT ''`);
     }
   },
 };

@@ -4,6 +4,7 @@ import React from 'react';
 import ScoreCell from './ScoreCell';
 import ContextMenu from './ContextMenu';
 import { formatGrade, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
+import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -388,8 +389,7 @@ export default function GradebookTable({
                   ])}
                   title="Right-click for actions"
                 >
-                  {student.last_name}, {student.first_name}
-                  {student.middle_name ? ` ${student.middle_name.charAt(0)}.` : ''}
+                  {displayName(student)}
                 </td>
 
                 {periods.map(period => {

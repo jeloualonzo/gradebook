@@ -7,9 +7,10 @@ import db from '@/lib/db';
  */
 
 // Case-insensitive identity used for duplicate detection:
-// First Name + Middle Name + Last Name (trimmed).
-export function fullNameKey({ first_name = '', middle_name = '', last_name = '' }) {
-  return [first_name, middle_name, last_name]
+// First + Middle + Last + Suffix (trimmed) — "Juan A. Dela Cruz Jr." and
+// "Juan A. Dela Cruz" are different people.
+export function fullNameKey({ first_name = '', middle_name = '', last_name = '', suffix = '' }) {
+  return [first_name, middle_name, last_name, suffix]
     .map(s => String(s || '').trim().toLowerCase())
     .join('|');
 }
@@ -102,13 +103,13 @@ export async function duplicateGroup(id) {
     );
     const students = db.all(
       `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
-       ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
+       ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
       [id]
     );
     for (const s of students) {
       db.run(
-        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [db.newId(), newGroupId, s.last_name, s.first_name, s.middle_name, s.sort_order, now, now]
+        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), newGroupId, s.last_name, s.first_name, s.middle_name, s.suffix || '', s.sort_order, now, now]
       );
     }
   });
@@ -118,12 +119,12 @@ export async function duplicateGroup(id) {
 export async function getGroupStudents(groupId) {
   return db.all(
     `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
-     ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
+     ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
     [groupId]
   );
 }
 
-export async function createGroupStudent(groupId, { last_name, first_name, middle_name = '' }) {
+export async function createGroupStudent(groupId, { last_name, first_name, middle_name = '', suffix = '' }) {
   const { maxOrder } = db.get(
     'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
     [groupId]
@@ -131,16 +132,16 @@ export async function createGroupStudent(groupId, { last_name, first_name, middl
   const id = db.newId();
   const now = db.now();
   db.run(
-    'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, groupId, last_name, first_name, middle_name || '', maxOrder + 1, now, now]
+    'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, groupId, last_name, first_name, middle_name || '', suffix || '', maxOrder + 1, now, now]
   );
   return id;
 }
 
-export async function updateGroupStudent(id, { last_name, first_name, middle_name = '' }) {
+export async function updateGroupStudent(id, { last_name, first_name, middle_name = '', suffix = '' }) {
   db.run(
-    'UPDATE group_students SET last_name=?, first_name=?, middle_name=?, updated_at=? WHERE id=?',
-    [last_name, first_name, middle_name || '', db.now(), id]
+    'UPDATE group_students SET last_name=?, first_name=?, middle_name=?, suffix=?, updated_at=? WHERE id=?',
+    [last_name, first_name, middle_name || '', suffix || '', db.now(), id]
   );
 }
 
@@ -170,7 +171,7 @@ export async function bulkAddGroupStudents(groupId, students) {
   let skipped = 0;
   db.transaction(() => {
     const existing = db.all(
-      'SELECT first_name, middle_name, last_name FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
+      'SELECT first_name, middle_name, last_name, suffix FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
       [groupId]
     );
     const seen = new Set(existing.map(fullNameKey));
@@ -185,6 +186,7 @@ export async function bulkAddGroupStudents(groupId, students) {
         first_name: String(s.first_name || '').trim(),
         middle_name: String(s.middle_name || '').trim(),
         last_name: String(s.last_name || '').trim(),
+        suffix: String(s.suffix || '').trim(),
       };
       if (!student.first_name && !student.last_name) continue; // blank row
       const key = fullNameKey(student);
@@ -194,8 +196,8 @@ export async function bulkAddGroupStudents(groupId, students) {
       }
       seen.add(key);
       db.run(
-        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [db.newId(), groupId, student.last_name, student.first_name, student.middle_name, order++, now, now]
+        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), groupId, student.last_name, student.first_name, student.middle_name, student.suffix || '', order++, now, now]
       );
       added++;
     }
@@ -214,11 +216,11 @@ export async function importGroupIntoSubject(subjectId, groupId, { skipDuplicate
   db.transaction(() => {
     const groupStudents = db.all(
       `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
-       ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
+       ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
       [groupId]
     );
     const existing = db.all(
-      'SELECT first_name, middle_name, last_name FROM students WHERE subject_id = ? AND deleted_at IS NULL',
+      'SELECT first_name, middle_name, last_name, suffix FROM students WHERE subject_id = ? AND deleted_at IS NULL',
       [subjectId]
     );
     const seen = new Set(existing.map(fullNameKey));
@@ -235,8 +237,8 @@ export async function importGroupIntoSubject(subjectId, groupId, { skipDuplicate
       }
       seen.add(fullNameKey(s));
       db.run(
-        'INSERT INTO students (id, subject_id, last_name, first_name, middle_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [db.newId(), subjectId, s.last_name, s.first_name, s.middle_name, order++, now, now]
+        'INSERT INTO students (id, subject_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), subjectId, s.last_name, s.first_name, s.middle_name, s.suffix || '', order++, now, now]
       );
       imported++;
     }

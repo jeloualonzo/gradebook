@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { formatDateMMDDYYYY } from '@/lib/dateUtils';
+import { displayName } from '@/lib/names';
 import { getSubjectById } from '@/lib/queries/subjects';
 import { getStudentsBySubject } from '@/lib/queries/students';
 import { getPeriodsBySubject, getAssessmentsByPeriod, getColumnsByAssessment } from '@/lib/queries/assessments';
@@ -41,7 +42,7 @@ export async function GET(request, { params }) {
     titleRow.font = { bold: true, size: 13 };
     ws.addRow([]);
 
-    const headers = ['#', 'Last Name', 'First Name'];
+    const headers = ['#', 'Student Name'];
     for (const period of periods) {
       for (const a of period.assessments) {
         for (const col of a.columns) {
@@ -58,7 +59,7 @@ export async function GET(request, { params }) {
     headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FE' } };
 
     students.forEach((student, idx) => {
-      const row = [idx + 1, student.last_name, student.first_name];
+      const row = [idx + 1, displayName(student)];
       const periodGrades = {};
       for (const period of periods) {
         for (const a of period.assessments) {
@@ -77,7 +78,7 @@ export async function GET(request, { params }) {
     });
 
     ws.columns.forEach((col, i) => {
-      col.width = i < 3 ? 20 : 14;
+      col.width = i === 0 ? 6 : i === 1 ? 30 : 14;
     });
 
     const buffer = await workbook.xlsx.writeBuffer();

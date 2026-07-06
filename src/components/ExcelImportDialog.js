@@ -1,7 +1,21 @@
 'use client';
 import { useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import Modal from './Modal';
 import { parseStudentsWorkbook, studentFullNameKey } from '@/lib/excelImport';
+
+/** Generate and download the import template (the four expected columns). */
+function downloadTemplate() {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['First Name', 'Middle Name', 'Last Name', 'Suffix'],
+    ['Juan', 'Santos', 'Dela Cruz', 'Jr.'],
+    ['Maria', 'Reyes', 'Garcia', ''],
+  ]);
+  ws['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Students');
+  XLSX.writeFile(wb, 'student-import-template.xlsx');
+}
 
 /**
  * Import students into a Student Group from an Excel file (.xlsx / .xls).
@@ -94,10 +108,18 @@ export default function ExcelImportDialog({ open, onClose, groupId, existingStud
       <div className="space-y-4">
         <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-3 leading-relaxed">
           The Excel file (<span className="font-medium">.xlsx</span> or <span className="font-medium">.xls</span>) must
-          contain exactly these three columns:{' '}
-          <span className="font-medium text-gray-700">First Name, Middle Name, Last Name</span>.
-          Column names are matched case-insensitively. Blank rows are ignored and
-          duplicate students (same full name) are skipped automatically.
+          contain the columns{' '}
+          <span className="font-medium text-gray-700">First Name, Middle Name, Last Name</span>
+          {' '}— plus an optional <span className="font-medium text-gray-700">Suffix</span> column
+          (Jr., Sr., II, III…). Column names are matched case-insensitively. Blank rows are
+          ignored and duplicate students (same full name) are skipped automatically.
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            className="block mt-1.5 text-blue-600 hover:text-blue-800 font-medium"
+          >
+            Download the Excel template
+          </button>
         </div>
 
         <div>
@@ -142,6 +164,7 @@ export default function ExcelImportDialog({ open, onClose, groupId, existingStud
                       <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">First Name</th>
                       <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Middle Name</th>
                       <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Last Name</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Suffix</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -150,6 +173,7 @@ export default function ExcelImportDialog({ open, onClose, groupId, existingStud
                         <td className="px-3 py-1.5 text-gray-800">{s.first_name}</td>
                         <td className="px-3 py-1.5 text-gray-500">{s.middle_name}</td>
                         <td className="px-3 py-1.5 text-gray-800">{s.last_name}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{s.suffix}</td>
                       </tr>
                     ))}
                   </tbody>

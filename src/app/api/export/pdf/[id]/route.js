@@ -1,4 +1,5 @@
 import { computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
+import { displayName } from '@/lib/names';
 import { getSubjectById } from '@/lib/queries/subjects';
 import { getStudentsBySubject } from '@/lib/queries/students';
 import { getPeriodsBySubject, getAssessmentsByPeriod, getColumnsByAssessment } from '@/lib/queries/assessments';
@@ -31,7 +32,7 @@ export async function GET(request, { params }) {
 
     const rows = students.map((student, idx) => {
       const periodGrades = {};
-      const rowData = { no: idx + 1, name: `${student.last_name}, ${student.first_name}` };
+      const rowData = { no: idx + 1, name: displayName(student) };
       for (const period of periods) {
         const grade = computePeriodGrade(period.assessments, scores, student.id);
         periodGrades[period.type] = grade;
