@@ -33,6 +33,9 @@ function GeneralTab({ showToast }) {
   const [info, setInfo] = useState(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  // Desktop only: application update state, refreshed while the tab is open.
+  const [update, setUpdate] = useState(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -43,6 +46,80 @@ function GeneralTab({ showToast }) {
       } catch { /* non-fatal */ }
     })();
   }, []);
+
+  useEffect(() => {
+    const api = typeof window !== 'undefined' ? window.gradebookDesktop : null;
+    if (!api?.updateStatus) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const u = await api.updateStatus();
+        if (alive) setUpdate(u);
+      } catch { /* non-fatal */ }
+    };
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  const checkNow = async () => {
+    const api = window.gradebookDesktop;
+    if (!api?.checkForUpdates) return;
+    setChecking(true);
+    try { setUpdate(await api.checkForUpdates()); } finally { setChecking(false); }
+  };
+
+  const installNow = async () => {
+    const ok = await window.gradebookDesktop?.installUpdate?.();
+    if (!ok) showToast('The update is not ready yet.', 'error');
+    // On success the app syncs, quits, and the installer takes over.
+  };
+
+  const updateRow = (() => {
+    if (!update) return null; // browser mode — updates are a desktop concern
+    const btn = (label, onClick, primary = false) => (
+      <button
+        onClick={onClick}
+        disabled={checking}
+        className={primary
+          ? 'px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50'
+          : 'px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50'}
+      >
+        {label}
+      </button>
+    );
+    switch (update.state) {
+      case 'checking':
+        return <span className="text-gray-500">Checking…</span>;
+      case 'downloading':
+        return <span className="text-blue-700">Downloading v{update.version}… {update.percent ?? 0}%</span>;
+      case 'downloaded':
+        return (
+          <div className="flex items-center gap-2 justify-end">
+            <span className="text-green-700">v{update.version} ready</span>
+            {btn('Restart and Update', installNow, true)}
+          </div>
+        );
+      case 'error':
+        return (
+          <div className="flex items-center gap-2 justify-end">
+            <span className="text-gray-400" title={update.error}>Couldn’t check (offline?)</span>
+            {btn(checking ? 'Checking…' : 'Check for Updates', checkNow)}
+          </div>
+        );
+      case 'uptodate':
+        return (
+          <div className="flex items-center gap-2 justify-end">
+            <span className="text-gray-500">Up to date</span>
+            {btn(checking ? 'Checking…' : 'Check for Updates', checkNow)}
+          </div>
+        );
+      default:
+        return update.packaged
+          ? btn(checking ? 'Checking…' : 'Check for Updates', checkNow)
+          : <span className="text-gray-400">Available in the installed app</span>;
+    }
+  })();
 
   const saveName = async () => {
     setSaving(true);
@@ -84,6 +161,7 @@ function GeneralTab({ showToast }) {
         </div>
       </Row>
       <Row label="Application version">{info?.version || '—'}</Row>
+      {updateRow && <Row label="Updates">{updateRow}</Row>}
       <Row label="Data folder">
         <span className="text-xs text-gray-500 break-all">{info?.data_dir || '—'}</span>
       </Row>

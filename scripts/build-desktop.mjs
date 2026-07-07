@@ -10,6 +10,8 @@
  *
  * Usage:
  *   node scripts/build-desktop.mjs            → build + Windows installer
+ *   node scripts/build-desktop.mjs --publish  → build + PUBLISH a GitHub release
+ *                                               (requires the GH_TOKEN env var)
  *   node scripts/build-desktop.mjs --dir      → build + unpacked app (smoke tests)
  *   node scripts/build-desktop.mjs --no-pack  → build server bundle only
  */
@@ -235,9 +237,20 @@ if (process.argv.includes('--no-pack')) {
 const icoPath = path.join(root, 'build', 'icon.ico');
 fs.writeFileSync(icoPath, Buffer.from(fs.readFileSync(path.join(root, 'build', 'icon.b64'), 'utf8'), 'base64'));
 console.log('\n→ refreshed build/icon.ico from build/icon.b64');
+const publishing = process.argv.includes('--publish');
+if (publishing && !process.env.GH_TOKEN) {
+  console.error(
+    'Publishing needs a GitHub token in the GH_TOKEN environment variable.\n' +
+    'Create one at https://github.com/settings/tokens (classic, "repo" scope),\n' +
+    'then run:  setx GH_TOKEN <your token>   (and open a NEW terminal).'
+  );
+  process.exit(1);
+}
 const builderArgs = process.argv.includes('--dir')
   ? ['--dir']
-  : ['--win', 'nsis', '--x64'];
+  : ['--win', 'nsis', '--x64', '--publish', publishing ? 'always' : 'never'];
 run(node, [path.join(root, 'node_modules', 'electron-builder', 'cli.js'), ...builderArgs]);
 
-console.log('\n✓ desktop build complete — see dist/');
+console.log(publishing
+  ? `\n✓ v${JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version} published to GitHub Releases — installed apps will pick it up.`
+  : '\n✓ desktop build complete — see dist/');

@@ -32,6 +32,41 @@ let syncTimer = null;
 let syncInFlight = false;
 let quitSyncDone = false;
 
+// ---- Automatic updates (GitHub Releases via electron-updater) --------------
+// The app checks GitHub for a newer release, downloads it in the background,
+// and installs on "Restart and Update" (or on normal quit). Offline checks
+// fail silently — being offline is a normal state for this app.
+let autoUpdater = null;
+let updateStatus = { state: 'idle', version: null, percent: null, error: null };
+const setUpdateStatus = (patch) => { updateStatus = { ...updateStatus, ...patch }; };
+
+function setupAutoUpdates() {
+  if (!app.isPackaged) return; // dev runs never self-update
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch (err) {
+    log(`Updater unavailable: ${err.message}`);
+    return;
+  }
+  autoUpdater.autoDownload = true;           // download in the background
+  autoUpdater.autoInstallOnAppQuit = true;   // closing the app applies it too
+  autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
+
+  autoUpdater.on('checking-for-update', () => setUpdateStatus({ state: 'checking', error: null }));
+  autoUpdater.on('update-available', info => setUpdateStatus({ state: 'downloading', version: info.version, percent: 0 }));
+  autoUpdater.on('download-progress', p => setUpdateStatus({ state: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', info => setUpdateStatus({ state: 'downloaded', version: info.version, percent: 100 }));
+  autoUpdater.on('update-not-available', () => setUpdateStatus({ state: 'uptodate', checked_at: new Date().toISOString() }));
+  autoUpdater.on('error', err => {
+    log(`Update check failed (offline is fine): ${err?.message || err}`);
+    setUpdateStatus({ state: 'error', error: String(err?.message || err) });
+  });
+
+  // First check shortly after boot (never competing with startup), then every 4h.
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 15000);
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000);
+}
+
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // periodic push/pull while the app is open
 
 // Cold starts are dominated by Windows re-reading thousands of server files
@@ -201,6 +236,27 @@ async function start() {
     fs.mkdirSync(backupsDir, { recursive: true });
     return shell.openPath(backupsDir);
   });
+
+  // ---- Update IPC (Settings → General + the status bar) --------------------
+  ipcMain.handle('gradebook:update-status', () => ({ ...updateStatus, current: app.getVersion(), packaged: app.isPackaged }));
+  ipcMain.handle('gradebook:check-updates', async () => {
+    if (autoUpdater) {
+      try { await autoUpdater.checkForUpdates(); } catch { /* status carries the error */ }
+    }
+    return { ...updateStatus, current: app.getVersion(), packaged: app.isPackaged };
+  });
+  ipcMain.handle('gradebook:install-update', async () => {
+    if (!autoUpdater || updateStatus.state !== 'downloaded') return false;
+    // Publish this session's work first, then hand over to the installer —
+    // and mark the quit sync as done so before-quit doesn't intercept.
+    await requestSync(6000, 'pre-update');
+    quitSyncDone = true;
+    if (syncTimer) clearInterval(syncTimer);
+    setImmediate(() => autoUpdater.quitAndInstall(false, true));
+    return true;
+  });
+
+  setupAutoUpdates();
 
   // Sync lifecycle (all no-ops until a sync folder is configured; failures
   // only log — the gradebook never waits on sync):

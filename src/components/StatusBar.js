@@ -16,6 +16,7 @@ export default function StatusBar() {
   const pathname = usePathname();
   const [info, setInfo] = useState(null); // { device_label, version }
   const [attention, setAttention] = useState(false);
+  const [update, setUpdate] = useState(null); // desktop only
 
   useEffect(() => {
     (async () => {
@@ -30,11 +31,16 @@ export default function StatusBar() {
             (sync.folder_problem || (sync.peers || []).some(p => p.clock_skew_minutes))
           ));
         }
+        const u = await window.gradebookDesktop?.updateStatus?.();
+        if (u) setUpdate(u);
       } catch {
         /* non-fatal */
       }
     })();
   }, [pathname]); // refresh when navigating between pages
+
+  const updateReady = update?.state === 'downloaded';
+  const updateBusy = update?.state === 'downloading';
 
   return (
     <div className="fixed bottom-0 inset-x-0 h-9 bg-white border-t border-gray-200 flex items-center justify-between px-4 z-40 text-xs">
@@ -48,12 +54,26 @@ export default function StatusBar() {
           <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
         </svg>
         Settings
-        {attention && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-amber-500" />}
+        {(attention || updateReady || updateBusy) && (
+          <span className={`absolute -top-0.5 -right-2 w-2 h-2 rounded-full ${attention ? 'bg-amber-500' : 'bg-blue-500'}`} />
+        )}
       </Link>
-      <div className="text-gray-400">
-        {info?.device_label && <span className="text-gray-500">{info.device_label}</span>}
-        {info?.device_label && info?.version && <span className="mx-1.5">·</span>}
-        {info?.version && <span>v{info.version}</span>}
+      <div className="flex items-center gap-3 text-gray-400">
+        {updateReady && (
+          <button
+            onClick={() => window.gradebookDesktop?.installUpdate?.()}
+            className="px-2.5 py-1 text-[11px] font-medium text-white bg-blue-600 rounded-full hover:bg-blue-700"
+            title={`Version ${update.version} is downloaded — restart to apply`}
+          >
+            Update ready — restart
+          </button>
+        )}
+        {updateBusy && <span className="text-blue-600">Downloading update… {update.percent ?? 0}%</span>}
+        <span>
+          {info?.device_label && <span className="text-gray-500">{info.device_label}</span>}
+          {info?.device_label && info?.version && <span className="mx-1.5">·</span>}
+          {info?.version && <span>v{info.version}</span>}
+        </span>
       </div>
     </div>
   );
