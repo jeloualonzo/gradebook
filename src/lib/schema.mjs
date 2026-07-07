@@ -30,6 +30,7 @@ export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS subjects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  subject_code TEXT NOT NULL DEFAULT '',   -- e.g. IT101 (optional, display-first)
   section TEXT NOT NULL,
   school_year TEXT NOT NULL,
   semester TEXT NOT NULL,

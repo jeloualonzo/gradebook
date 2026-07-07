@@ -111,7 +111,10 @@ export default function GradebookPage() {
           </svg>
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-semibold text-gray-900 truncate">{subject.name}</h1>
+          <h1 className="text-sm font-semibold text-gray-900 truncate">
+            {subject.subject_code && <span className="text-blue-700 font-bold mr-1.5">{subject.subject_code}</span>}
+            {subject.name}
+          </h1>
           <p className="text-xs text-gray-500">
             {subject.section} · {subject.school_year} · {subject.semester === '1st' ? '1st Semester' : subject.semester === '2nd' ? '2nd Semester' : 'Summer'}
           </p>

@@ -35,7 +35,8 @@ export const FORMAT_VERSION = 1;
 //   v2: purged_at + deleted_by_device_id on subjects/student_groups (recycle bin)
 //   v3: suffix on students/group_students (name suffixes: Jr., III, …)
 //   v4: attendance_source on assessment_columns (score ⇒ auto-Present)
-export const SCHEMA_VERSION = 4;
+//   v5: subject_code on subjects
+export const SCHEMA_VERSION = 5;
 
 // Parents strictly before children (foreign-key safe application order).
 // `naturalKey` marks tables whose rows have an identity beyond their UUID —
@@ -43,7 +44,7 @@ export const SCHEMA_VERSION = 4;
 export const SYNCED_TABLES = [
   {
     name: 'subjects',
-    columns: ['id', 'name', 'section', 'school_year', 'semester', 'prelim_weight', 'midterm_weight', 'final_weight', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at', 'purged_at', 'deleted_by_device_id'],
+    columns: ['id', 'name', 'subject_code', 'section', 'school_year', 'semester', 'prelim_weight', 'midterm_weight', 'final_weight', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at', 'purged_at', 'deleted_by_device_id'],
   },
   {
     name: 'grading_periods',

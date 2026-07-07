@@ -27,7 +27,7 @@ const ctxOnA = { localDeviceId: A, peerDeviceId: B }; // merging B's snapshot on
 const ctxOnB = { localDeviceId: B, peerDeviceId: A }; // merging A's snapshot on B
 
 const subj = (over = {}) => ({
-  id: 's1', name: 'BPM', section: 'X', school_year: '2026-2027', semester: '1st',
+  id: 's1', name: 'BPM', subject_code: '', section: 'X', school_year: '2026-2027', semester: '1st',
   prelim_weight: 30, midterm_weight: 30, final_weight: 40,
   owner_device_id: A, created_at: '2026-07-01T00:00:00.000Z',
   updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null,

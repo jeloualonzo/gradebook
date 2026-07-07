@@ -38,7 +38,7 @@ export async function GET(request, { params }) {
     const workbook = new ExcelJS.Workbook();
     const ws = workbook.addWorksheet(`${subject.name} - ${subject.section}`);
 
-    const titleRow = ws.addRow([`${subject.name} | ${subject.section} | ${subject.school_year} | ${subject.semester}`]);
+    const titleRow = ws.addRow([`${subject.subject_code ? subject.subject_code + " — " : ""}${subject.name} | ${subject.section} | ${subject.school_year} | ${subject.semester}`]);
     titleRow.font = { bold: true, size: 13 };
     ws.addRow([]);
 

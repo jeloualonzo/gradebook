@@ -24,6 +24,7 @@ export default function NewSubjectPage() {
 
   const [form, setForm] = useState({
     name: '',
+    subject_code: '',
     section: '',
     school_year: SCHOOL_YEARS[2],
     semester: '1st',
@@ -124,9 +125,15 @@ export default function NewSubjectPage() {
 
       <main className="max-w-2xl mx-auto px-6 py-8">
         <form onSubmit={handleCreate} className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
-          <div>
-            <label className={labelClass}>Subject Name</label>
-            <input className={inputClass} value={form.name} onChange={set('name')} placeholder="e.g. Introduction to Computing" required />
+          <div className="flex gap-3">
+            <div className="w-28 shrink-0">
+              <label className={labelClass}>Subject Code</label>
+              <input className={inputClass} value={form.subject_code} onChange={set('subject_code')} placeholder="IT101" />
+            </div>
+            <div className="flex-1">
+              <label className={labelClass}>Subject Title</label>
+              <input className={inputClass} value={form.name} onChange={set('name')} placeholder="e.g. Introduction to Computing" required />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

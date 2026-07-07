@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -82,6 +82,15 @@ export const MIGRATIONS = {
     const cols = db.prepare('PRAGMA table_info(assessment_columns)').all().map(c => c.name);
     if (!cols.includes('attendance_source')) {
       db.exec('ALTER TABLE assessment_columns ADD COLUMN attendance_source INTEGER NOT NULL DEFAULT 0');
+    }
+  },
+
+  // v6 — subject code (IT101, GE-MMW …): instructors recognize courses by
+  // code faster than by title. Optional, display-first, part of search.
+  6: (db) => {
+    const cols = db.prepare('PRAGMA table_info(subjects)').all().map(c => c.name);
+    if (!cols.includes('subject_code')) {
+      db.exec("ALTER TABLE subjects ADD COLUMN subject_code TEXT NOT NULL DEFAULT ''");
     }
   },
 };

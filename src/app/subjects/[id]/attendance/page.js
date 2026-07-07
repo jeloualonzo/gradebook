@@ -174,14 +174,10 @@ function AttendanceContent() {
       });
       if (!saveRes.ok) throw new Error('Could not save attendance.');
 
-      setToast({
-        msg: existingColumn
-          ? `Attendance for ${formatDateMMDDYYYY(date)} updated`
-          : `Attendance for ${formatDateMMDDYYYY(date)} saved to gradebook`,
-        type: 'success',
-        k: Date.now(),
-      });
-      setTimeout(() => router.push(`/subjects/${id}`), 1200);
+      // The save is already committed — return to the gradebook IMMEDIATELY
+      // (the new attendance column being visible IS the confirmation; the
+      // old 1.2s toast delay just made a fast save feel slow).
+      router.push(`/subjects/${id}`);
     } catch (err) {
       setToast({ msg: err.message, type: 'error', k: Date.now() });
     } finally {

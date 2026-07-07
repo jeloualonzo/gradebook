@@ -1,0 +1,60 @@
+'use client';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+/**
+ * Slim desktop-style status bar, fixed at the bottom of every page.
+ *
+ * Left:  Settings (always reachable, never competing with primary actions)
+ *        + an amber dot when synchronization needs a look.
+ * Right: laptop name · app version — quiet identity/status information.
+ *
+ * This is also the natural future home for an "Update available" badge.
+ */
+export default function StatusBar() {
+  const pathname = usePathname();
+  const [info, setInfo] = useState(null); // { device_label, version }
+  const [attention, setAttention] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [devRes, syncRes] = await Promise.all([fetch('/api/device'), fetch('/api/sync')]);
+        const dev = await devRes.json();
+        const sync = await syncRes.json();
+        if (devRes.ok) setInfo(dev);
+        if (syncRes.ok) {
+          setAttention(!!(
+            sync.sync_folder &&
+            (sync.folder_problem || (sync.peers || []).some(p => p.clock_skew_minutes))
+          ));
+        }
+      } catch {
+        /* non-fatal */
+      }
+    })();
+  }, [pathname]); // refresh when navigating between pages
+
+  return (
+    <div className="fixed bottom-0 inset-x-0 h-9 bg-white border-t border-gray-200 flex items-center justify-between px-4 z-40 text-xs">
+      <Link
+        href="/settings"
+        title={attention ? 'Settings — sync needs attention' : 'Settings'}
+        className={`relative flex items-center gap-1.5 font-medium ${pathname === '/settings' ? 'text-blue-700' : 'text-gray-500 hover:text-gray-800'}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+        </svg>
+        Settings
+        {attention && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-amber-500" />}
+      </Link>
+      <div className="text-gray-400">
+        {info?.device_label && <span className="text-gray-500">{info.device_label}</span>}
+        {info?.device_label && info?.version && <span className="mx-1.5">·</span>}
+        {info?.version && <span>v{info.version}</span>}
+      </div>
+    </div>
+  );
+}

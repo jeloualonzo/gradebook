@@ -8,22 +8,22 @@ export async function getSubjectById(id) {
   return db.get('SELECT * FROM subjects WHERE id = ? AND deleted_at IS NULL', [id]) || null;
 }
 
-export async function createSubject({ name, section, school_year, semester, prelim_weight = 30, midterm_weight = 30, final_weight = 40 }) {
+export async function createSubject({ name, subject_code = '', section, school_year, semester, prelim_weight = 30, midterm_weight = 30, final_weight = 40 }) {
   const id = db.newId();
   const now = db.now();
   db.run(
-    `INSERT INTO subjects (id, name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, owner_device_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.getDeviceId(), now, now]
+    `INSERT INTO subjects (id, name, subject_code, section, school_year, semester, prelim_weight, midterm_weight, final_weight, owner_device_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, name, String(subject_code || '').trim(), section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.getDeviceId(), now, now]
   );
   return id;
 }
 
-export async function updateSubject(id, { name, section, school_year, semester, prelim_weight, midterm_weight, final_weight }) {
+export async function updateSubject(id, { name, subject_code = '', section, school_year, semester, prelim_weight, midterm_weight, final_weight }) {
   db.run(
-    `UPDATE subjects SET name=?, section=?, school_year=?, semester=?, prelim_weight=?, midterm_weight=?, final_weight=?, updated_at=?
+    `UPDATE subjects SET name=?, subject_code=?, section=?, school_year=?, semester=?, prelim_weight=?, midterm_weight=?, final_weight=?, updated_at=?
      WHERE id=?`,
-    [name, section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.now(), id]
+    [name, String(subject_code || '').trim(), section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.now(), id]
   );
 }
 

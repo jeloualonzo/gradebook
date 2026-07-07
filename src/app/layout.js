@@ -1,5 +1,6 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
+import StatusBar from '@/components/StatusBar';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -11,8 +12,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="bg-gray-50 text-gray-900 min-h-screen">
+      {/* pb-9 keeps page content clear of the fixed status bar */}
+      <body className="bg-gray-50 text-gray-900 min-h-screen pb-9">
         {children}
+        <StatusBar />
       </body>
     </html>
   );
