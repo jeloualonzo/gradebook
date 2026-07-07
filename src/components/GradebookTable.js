@@ -276,6 +276,8 @@ export default function GradebookTable({
                         key={a.id}
                         assessment={a}
                         periodId={period.id}
+                        periodType={period.type}
+                        subjectId={subject.id}
                         colors={colors}
                         mode="header-name"
                         onRefresh={onRefreshPeriods}
@@ -312,6 +314,8 @@ export default function GradebookTable({
                       key={a.id}
                       assessment={a}
                       periodId={period.id}
+                        periodType={period.type}
+                        subjectId={subject.id}
                       colors={colors}
                       mode="header-dates"
                       onRefresh={onRefreshPeriods}
@@ -341,6 +345,8 @@ export default function GradebookTable({
                       key={a.id}
                       assessment={a}
                       periodId={period.id}
+                        periodType={period.type}
+                        subjectId={subject.id}
                       colors={colors}
                       mode="header-max-scores"
                       onRefresh={onRefreshPeriods}

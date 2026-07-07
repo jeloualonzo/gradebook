@@ -206,6 +206,40 @@ export async function bulkAddGroupStudents(groupId, students) {
 }
 
 /**
+ * The REVERSE of importing: snapshot a subject's current students as a new
+ * reusable Student Group (a copy — the subject is not modified). Groups are
+ * independent collections, so overlap with other groups is fine.
+ * Returns { group_id, added }.
+ */
+export async function createGroupFromSubject(subjectId, name) {
+  let groupId = null;
+  let added = 0;
+  db.transaction(() => {
+    const students = db.all(
+      `SELECT last_name, first_name, middle_name, suffix FROM students
+       WHERE subject_id = ? AND deleted_at IS NULL
+       ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
+      [subjectId]
+    );
+    if (students.length === 0) throw new Error('This subject has no students to save.');
+    const now = db.now();
+    groupId = db.newId();
+    db.run(
+      'INSERT INTO student_groups (id, name, description, owner_device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [groupId, name, '', db.getDeviceId(), now, now]
+    );
+    students.forEach((s, i) => {
+      db.run(
+        'INSERT INTO group_students (id, group_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), groupId, s.last_name, s.first_name, s.middle_name, s.suffix || '', i, now, now]
+      );
+      added++;
+    });
+  });
+  return { group_id: groupId, added };
+}
+
+/**
  * One-time COPY of a group's students into a subject. New students are
  * appended after the subject's existing list; existing grades are untouched.
  * Returns { imported, skipped }.

@@ -34,7 +34,8 @@ export const FORMAT_VERSION = 1;
 // local-only tables (like sync_conflicts) never affect this number.
 //   v2: purged_at + deleted_by_device_id on subjects/student_groups (recycle bin)
 //   v3: suffix on students/group_students (name suffixes: Jr., III, …)
-export const SCHEMA_VERSION = 3;
+//   v4: attendance_source on assessment_columns (score ⇒ auto-Present)
+export const SCHEMA_VERSION = 4;
 
 // Parents strictly before children (foreign-key safe application order).
 // `naturalKey` marks tables whose rows have an identity beyond their UUID —
@@ -59,7 +60,7 @@ export const SYNCED_TABLES = [
   },
   {
     name: 'assessment_columns',
-    columns: ['id', 'assessment_id', 'date', 'max_score', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
+    columns: ['id', 'assessment_id', 'date', 'max_score', 'attendance_source', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
   },
   {
     name: 'scores',

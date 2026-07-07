@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -72,6 +72,16 @@ export const MIGRATIONS = {
     for (const table of ['students', 'group_students']) {
       const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
       if (!cols.includes('suffix')) db.exec(`ALTER TABLE ${table} ADD COLUMN suffix TEXT NOT NULL DEFAULT ''`);
+    }
+  },
+
+  // v5 — attendance source: a date column of any assessment (a quiz, an
+  // activity …) can be marked so that entering a score automatically marks
+  // the student Present in the Attendance assessment for the same date.
+  5: (db) => {
+    const cols = db.prepare('PRAGMA table_info(assessment_columns)').all().map(c => c.name);
+    if (!cols.includes('attendance_source')) {
+      db.exec('ALTER TABLE assessment_columns ADD COLUMN attendance_source INTEGER NOT NULL DEFAULT 0');
     }
   },
 };

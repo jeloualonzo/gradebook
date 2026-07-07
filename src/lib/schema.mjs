@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS assessment_columns (
   assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
   date TEXT,
   max_score REAL NOT NULL DEFAULT 100,
+  attendance_source INTEGER NOT NULL DEFAULT 0,  -- scoring this date auto-marks Present in Attendance
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

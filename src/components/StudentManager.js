@@ -11,6 +11,34 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  // Save the current roster as a reusable Student Group (a copy).
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupMsg, setGroupMsg] = useState(null); // { text, ok }
+  const [savingGroup, setSavingGroup] = useState(false);
+
+  const saveAsGroup = async () => {
+    const name = groupName.trim();
+    if (!name) return;
+    setSavingGroup(true);
+    setGroupMsg(null);
+    try {
+      const res = await fetch(`/api/subjects/${subjectId}/create-group`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Could not create the group');
+      setGroupMsg({ text: `Student Group “${name}” created with ${d.added} student${d.added !== 1 ? 's' : ''}.`, ok: true });
+      setGroupOpen(false);
+      setGroupName('');
+    } catch (err) {
+      setGroupMsg({ text: err.message, ok: false });
+    } finally {
+      setSavingGroup(false);
+    }
+  };
 
   const filtered = students.filter(s =>
     searchText(s).includes(search.toLowerCase())
@@ -107,6 +135,42 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
           </table>
         )}
       </div>
+
+      {students.length > 0 && (
+        <div className="mt-3">
+          {groupOpen ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Group name, e.g. BSIT 2A (2026)"
+                value={groupName}
+                onChange={e => setGroupName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveAsGroup()}
+              />
+              <button
+                onClick={saveAsGroup}
+                disabled={savingGroup || !groupName.trim()}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {savingGroup ? 'Creating…' : 'Create'}
+              </button>
+              <button onClick={() => { setGroupOpen(false); setGroupMsg(null); }} className="text-gray-400 hover:text-gray-600 px-1">✕</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setGroupOpen(true); setGroupMsg(null); }}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              title="Creates a reusable copy in Student Groups — this subject is not changed"
+            >
+              Save these {students.length} student{students.length !== 1 ? 's' : ''} as a Student Group…
+            </button>
+          )}
+          {groupMsg && (
+            <p className={`text-xs mt-1.5 ${groupMsg.ok ? 'text-green-700' : 'text-red-600'}`}>{groupMsg.text}</p>
+          )}
+        </div>
+      )}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Add Student" width="max-w-sm">
         <StudentForm onSubmit={handleAdd} onCancel={() => setOpen(false)} loading={loading} />

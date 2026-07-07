@@ -1,6 +1,7 @@
 'use client';
 import { useState, useRef, memo } from 'react';
 import ConfirmDialog from './ConfirmDialog';
+import MoveColumnDialog from './MoveColumnDialog';
 import { formatNumber, toCents, centsToNumber } from '@/lib/gradeCalculator';
 import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
 import { useSortable } from '@dnd-kit/sortable';
@@ -37,6 +38,8 @@ function SortableHeaderCell({ id, periodId, colSpan, className, dragDisabled, on
 function AssessmentBlock({
   assessment,
   periodId,
+  periodType,
+  subjectId,
   colors,
   mode,
   onRefresh,
@@ -57,6 +60,7 @@ function AssessmentBlock({
   const [weight, setWeight] = useState(assessment.weight_percent);
   const [confirmDeleteColumn, setConfirmDeleteColumn] = useState(null);
   const [editingDate, setEditingDate] = useState(null);
+  const [movingColumn, setMovingColumn] = useState(null);
   // Set when Escape cancels a date edit, so the blur commit is skipped.
   const dateCancelRef = useRef(false);
 
@@ -447,6 +451,28 @@ function AssessmentBlock({
     );
   }
 
+  // Marking a date as an "attendance source": entering a score on it
+  // automatically marks the student Present in Attendance for the same date.
+  const toggleAttendanceSource = async (col) => {
+    const next = col.attendance_source ? 0 : 1;
+    const apply = (v) => onPatchColumn(col.id, { attendance_source: v });
+    apply(next); // instant UI
+    try {
+      await putColumn(col.id, { attendance_source: next });
+    } catch {
+      apply(col.attendance_source ? 1 : 0);
+      onSaveError?.('Could not save the attendance setting — value restored.');
+      return;
+    }
+    onHistoryPush?.({
+      label: next ? 'count date as attendance' : 'stop counting date as attendance',
+      undo: async () => { apply(next ? 0 : 1); await putColumn(col.id, { attendance_source: next ? 0 : 1 }); },
+      redo: async () => { apply(next); await putColumn(col.id, { attendance_source: next }); },
+    });
+  };
+
+  const isAttendanceAssessment = String(assessment.name || '').toLowerCase() === 'attendance';
+
   // Right-click menu for one date column. "Edit max score" focuses the max
   // input in the row below (located via its data attribute).
   const columnMenuItems = (col) => [
@@ -458,11 +484,21 @@ function AssessmentBlock({
         if (input) { input.focus(); input.select?.(); }
       },
     },
-    // The exam always keeps exactly one date column — no delete for it.
+    // Attendance source toggle: only meaningful for dated, non-exam columns
+    // of ordinary assessments (Attendance itself can't feed Attendance).
+    !assessment.is_exam && !isAttendanceAssessment && !!col.date && {
+      label: col.attendance_source ? 'Counts as attendance ✓' : 'Count as attendance',
+      onClick: () => toggleAttendanceSource(col),
+    },
+    // Exams keep exactly one date column — moving/deleting is for the rest.
+    !assessment.is_exam && {
+      label: 'Move to another subject…',
+      separatorBefore: true,
+      onClick: () => setMovingColumn(col),
+    },
     !assessment.is_exam && {
       label: 'Delete date column…',
       danger: true,
-      separatorBefore: true,
       onClick: () => handleDeleteColumn(col.id),
     },
   ];
@@ -523,8 +559,9 @@ function AssessmentBlock({
             <span
               className="block text-[9px] cursor-pointer hover:text-blue-600 py-0.5 truncate"
               onClick={() => setEditingDate(col.id)}
-              title={formatDateMMDDYYYY(col.date)}
+              title={`${formatDateMMDDYYYY(col.date)}${col.attendance_source ? ' — counts as attendance' : ''}`}
             >
+              {!!col.attendance_source && <span className="text-green-600 font-bold">✓</span>}
               {formatDateMMDDYYYY(col.date)}
             </span>
             {editingDate === col.id && (
@@ -555,6 +592,15 @@ function AssessmentBlock({
           onConfirm={confirmDeleteColumnAction}
           title="Delete Column"
           message="Delete this assessment column? All scores in this column will be removed."
+        />
+        <MoveColumnDialog
+          open={movingColumn !== null}
+          onClose={() => setMovingColumn(null)}
+          column={movingColumn}
+          assessmentName={assessment.name}
+          sourceSubjectId={subjectId}
+          sourcePeriodType={periodType}
+          onMoved={() => refreshAll()}
         />
       </>
     );
@@ -615,6 +661,22 @@ function AssessmentBlock({
             />
           </th>
         ))}
+        <ConfirmDialog
+          open={confirmDeleteColumn !== null}
+          onClose={() => setConfirmDeleteColumn(null)}
+          onConfirm={confirmDeleteColumnAction}
+          title="Delete Column"
+          message="Delete this assessment column? All scores in this column will be removed."
+        />
+        <MoveColumnDialog
+          open={movingColumn !== null}
+          onClose={() => setMovingColumn(null)}
+          column={movingColumn}
+          assessmentName={assessment.name}
+          sourceSubjectId={subjectId}
+          sourcePeriodType={periodType}
+          onMoved={() => refreshAll()}
+        />
       </>
     );
   }
