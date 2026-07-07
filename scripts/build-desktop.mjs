@@ -16,6 +16,7 @@
  *   node scripts/build-desktop.mjs --no-pack  → build server bundle only
  */
 import { spawnSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -251,17 +252,47 @@ if (process.argv.includes('--no-pack')) {
 const icoPath = path.join(root, 'build', 'icon.ico');
 fs.writeFileSync(icoPath, Buffer.from(fs.readFileSync(path.join(root, 'build', 'icon.b64'), 'utf8'), 'base64'));
 console.log('\n→ refreshed build/icon.ico from build/icon.b64');
-// Publishing a NON-draft GitHub release requires the version's git tag to
-// already exist in the repository (GitHub rejects it otherwise with
-// "Published releases must have a valid tag"). Create and push it here so
-// releasing stays one command. Idempotent: an existing tag is fine.
-if (publishing) {
+// electron-builder ONLY builds; this script owns publishing (below).
+// Its own GitHub publisher runs two parallel tasks that race each other
+// creating the release (observed: 422 already_exists killing the publish
+// halfway, leaving a release with missing assets).
+const builderArgs = process.argv.includes('--dir')
+  ? ['--dir']
+  : ['--win', 'nsis', '--x64', '--publish', 'never'];
+run(node, [path.join(root, 'node_modules', 'electron-builder', 'cli.js'), ...builderArgs]);
+
+/**
+ * Publish to GitHub Releases — deterministic and IDEMPOTENT:
+ *   1. push the version tag (published releases require an existing tag)
+ *   2. create the release, or reuse it if it already exists
+ *   3. upload the installer, blockmap, and latest.yml — replacing any
+ *      half-uploaded assets from a previous failed attempt
+ * Re-running after any failure repairs the release in place.
+ */
+async function publishToGitHub() {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  const tag = `v${pkg.version}`;
+  const version = pkg.version;
+  const tag = `v${version}`;
   const gh = (pkg.build?.publish || [])[0] || {};
   const scrub = (s) => String(s || '').replaceAll(process.env.GH_TOKEN, '***');
-  console.log(`\n→ ensuring git tag ${tag} exists on GitHub (published releases require it)`);
-  spawnSync('git', ['tag', tag], { cwd: root, stdio: 'ignore' }); // no-op if it exists
+  const api = (p, init = {}) => fetch(`https://api.github.com${p}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${process.env.GH_TOKEN}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'gradebook-release-script',
+      ...(init.headers || {}),
+    },
+  });
+  const fail = async (msg, resp) => {
+    const body = resp ? await resp.text().catch(() => '') : '';
+    console.error(scrub(`${msg}${body ? `\n${body}` : ''}`));
+    process.exit(1);
+  };
+
+  // 1. Tag (idempotent).
+  console.log(`\n→ ensuring git tag ${tag} exists on GitHub`);
+  spawnSync('git', ['tag', tag], { cwd: root, stdio: 'ignore' });
   const pushUrl = `https://x-access-token:${process.env.GH_TOKEN}@github.com/${gh.owner}/${gh.repo}.git`;
   const pushed = spawnSync('git', ['push', pushUrl, tag], { cwd: root, stdio: 'pipe' });
   const pushOut = scrub(pushed.stdout) + scrub(pushed.stderr);
@@ -269,14 +300,79 @@ if (publishing) {
     console.error(`Could not push the ${tag} tag to GitHub:\n${pushOut}`);
     process.exit(1);
   }
-  console.log(`  tag ${tag} is on GitHub`);
+
+  // 2. Release (create or reuse).
+  console.log(`→ ensuring the ${tag} release exists`);
+  let release;
+  const existing = await api(`/repos/${gh.owner}/${gh.repo}/releases/tags/${tag}`);
+  if (existing.status === 200) {
+    release = await existing.json();
+    console.log('  release exists — repairing/attaching assets');
+  } else {
+    const created = await api(`/repos/${gh.owner}/${gh.repo}/releases`, {
+      method: 'POST',
+      body: JSON.stringify({ tag_name: tag, name: version }),
+    });
+    if (created.status !== 201) return fail(`Could not create the ${tag} release (${created.status}):`, created);
+    release = await created.json();
+    console.log('  release created');
+  }
+
+  // 3. The update manifest — electron-updater's source of truth. If
+  // electron-builder didn't emit it (publish=never can skip it), synthesize
+  // it: version, file name, size, and base64 sha512 of the installer.
+  const exeName = `Gradebook-Setup-${version}.exe`;
+  const exePath = path.join(root, 'dist', exeName);
+  if (!fs.existsSync(exePath)) return fail(`dist/${exeName} is missing — build failed?`);
+  const ymlPath = path.join(root, 'dist', 'latest.yml');
+  if (!fs.existsSync(ymlPath)) {
+    const buf = fs.readFileSync(exePath);
+    const sha512 = crypto.createHash('sha512').update(buf).digest('base64');
+    fs.writeFileSync(ymlPath, [
+      `version: ${version}`,
+      'files:',
+      `  - url: ${exeName}`,
+      `    sha512: ${sha512}`,
+      `    size: ${buf.length}`,
+      `path: ${exeName}`,
+      `sha512: ${sha512}`,
+      `releaseDate: '${new Date().toISOString()}'`,
+      '',
+    ].join('\n'));
+    console.log('  latest.yml synthesized');
+  }
+
+  // 4. Upload assets (replace any partial leftovers).
+  for (const name of [exeName, `${exeName}.blockmap`, 'latest.yml']) {
+    const filePath = path.join(root, 'dist', name);
+    if (!fs.existsSync(filePath)) return fail(`dist/${name} is missing — build failed?`);
+    const leftover = (release.assets || []).find(a => a.name === name);
+    if (leftover) {
+      await api(`/repos/${gh.owner}/${gh.repo}/releases/assets/${leftover.id}`, { method: 'DELETE' });
+    }
+    const buf = fs.readFileSync(filePath);
+    const up = await fetch(
+      `https://uploads.github.com/repos/${gh.owner}/${gh.repo}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.GH_TOKEN}`,
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(buf.length),
+          'User-Agent': 'gradebook-release-script',
+        },
+        body: buf,
+      }
+    );
+    if (up.status !== 201) return fail(`Uploading ${name} failed (${up.status}):`, up);
+    console.log(`  uploaded ${name} (${(buf.length / 1048576).toFixed(1)} MB)`);
+  }
+
+  console.log(`\n✓ v${version} published to GitHub Releases — installed apps will pick it up.`);
 }
 
-const builderArgs = process.argv.includes('--dir')
-  ? ['--dir']
-  : ['--win', 'nsis', '--x64', '--publish', publishing ? 'always' : 'never'];
-run(node, [path.join(root, 'node_modules', 'electron-builder', 'cli.js'), ...builderArgs]);
-
-console.log(publishing
-  ? `\n✓ v${JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version} published to GitHub Releases — installed apps will pick it up.`
-  : '\n✓ desktop build complete — see dist/');
+if (publishing) {
+  await publishToGitHub();
+} else {
+  console.log('\n✓ desktop build complete — see dist/');
+}
