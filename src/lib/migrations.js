@@ -99,50 +99,59 @@ export const MIGRATIONS = {
  * Bring `db` up to `targetVersion`. Returns { from, to, applied }.
  * The options parameter exists so tests can drive the exact same code path
  * with a scratch version/migration set; production callers pass nothing.
+ *
+ * CONCURRENCY-SAFE: `next build` collects page data with MULTIPLE worker
+ * processes, each of which opens the database and reaches this function at
+ * the same time. Everything runs inside ONE IMMEDIATE transaction — the
+ * write lock is taken up front (so concurrent openers QUEUE on busy_timeout
+ * instead of dying with SQLITE_BUSY_SNAPSHOT), and the version is re-read
+ * under that lock, so whoever wins migrates once and everyone else sees a
+ * finished database. A failing step rolls the WHOLE upgrade back.
  */
 export function runMigrations(
   db,
   { targetVersion = SCHEMA_VERSION, migrations = MIGRATIONS, log = console } = {}
 ) {
-  const from = db.pragma('user_version', { simple: true });
+  const tx = db.transaction(() => {
+    // Read the version UNDER the write lock — another process may have
+    // migrated while we were waiting for it.
+    const from = db.pragma('user_version', { simple: true });
 
-  if (from === 0) {
-    // Brand-new database: the schema (already executed by the caller) just
-    // created the current shape directly — stamp it and done.
-    db.pragma(`user_version = ${targetVersion}`);
-    return { from: 0, to: targetVersion, applied: [] };
-  }
-
-  if (from > targetVersion) {
-    // Database written by a NEWER app version (this copy was rolled back or
-    // not yet updated). Extra tables/columns are harmless to SQLite reads
-    // and writes, so keep working — but say so.
-    log.warn(
-      `[db] database schema is v${from} but this app knows v${targetVersion} — ` +
-      'it will keep working, but update the app when you can.'
-    );
-    return { from, to: from, applied: [] };
-  }
-
-  const applied = [];
-  let version = from;
-  while (version < targetVersion) {
-    const next = version + 1;
-    const step = migrations[next];
-    if (typeof step !== 'function') {
-      throw new Error(
-        `[db] no migration registered for schema v${next} — refusing to touch the database.`
-      );
+    if (from === 0) {
+      // Brand-new database: the schema (already executed by the caller) just
+      // created the current shape directly — stamp it and done.
+      db.pragma(`user_version = ${targetVersion}`);
+      return { from: 0, to: targetVersion, applied: [] };
     }
-    // Transactional: a failing step rolls back completely, leaving the
-    // database at its previous version (and the launch backup untouched).
-    db.transaction(() => {
+
+    if (from > targetVersion) {
+      // Database written by a NEWER app version (this copy was rolled back or
+      // not yet updated). Extra tables/columns are harmless to SQLite reads
+      // and writes, so keep working — but say so.
+      log.warn(
+        `[db] database schema is v${from} but this app knows v${targetVersion} — ` +
+        'it will keep working, but update the app when you can.'
+      );
+      return { from, to: from, applied: [] };
+    }
+
+    const applied = [];
+    let version = from;
+    while (version < targetVersion) {
+      const next = version + 1;
+      const step = migrations[next];
+      if (typeof step !== 'function') {
+        throw new Error(
+          `[db] no migration registered for schema v${next} — refusing to touch the database.`
+        );
+      }
       step(db);
       db.pragma(`user_version = ${next}`);
-    })();
-    version = next;
-    applied.push(next);
-    log.info?.(`[db] migrated database schema v${next - 1} → v${next}`);
-  }
-  return { from, to: version, applied };
+      version = next;
+      applied.push(next);
+      log.info?.(`[db] migrated database schema v${next - 1} → v${next}`);
+    }
+    return { from, to: version, applied };
+  });
+  return tx.immediate();
 }

@@ -78,6 +78,20 @@ function ensureRootNodeAbi() {
   run(node, [path.join(root, 'node_modules', 'prebuild-install', 'bin.js')], { cwd: rootSqlite });
 }
 
+// 0. Publishing pre-flight — fail in ONE SECOND, not after a full build.
+const publishing = process.argv.includes('--publish');
+if (publishing && !process.env.GH_TOKEN) {
+  console.error(
+    'Publishing needs a GitHub token in the GH_TOKEN environment variable.\n' +
+    'Create one at https://github.com/settings/tokens (classic, "repo" scope), then:\n' +
+    '  setx GH_TOKEN <your token>\n' +
+    'and CLOSE EVERY terminal window (or restart VS Code entirely) — new tabs\n' +
+    'inside an already-open terminal app keep the OLD environment.\n' +
+    'For this session only, you can also run:  $env:GH_TOKEN = "<your token>"'
+  );
+  process.exit(1);
+}
+
 // 1. Standalone Next build (from a clean slate) --------------------------------
 ensureRootNodeAbi();
 fs.rmSync(standalone, { recursive: true, force: true });
@@ -237,15 +251,6 @@ if (process.argv.includes('--no-pack')) {
 const icoPath = path.join(root, 'build', 'icon.ico');
 fs.writeFileSync(icoPath, Buffer.from(fs.readFileSync(path.join(root, 'build', 'icon.b64'), 'utf8'), 'base64'));
 console.log('\n→ refreshed build/icon.ico from build/icon.b64');
-const publishing = process.argv.includes('--publish');
-if (publishing && !process.env.GH_TOKEN) {
-  console.error(
-    'Publishing needs a GitHub token in the GH_TOKEN environment variable.\n' +
-    'Create one at https://github.com/settings/tokens (classic, "repo" scope),\n' +
-    'then run:  setx GH_TOKEN <your token>   (and open a NEW terminal).'
-  );
-  process.exit(1);
-}
 const builderArgs = process.argv.includes('--dir')
   ? ['--dir']
   : ['--win', 'nsis', '--x64', '--publish', publishing ? 'always' : 'never'];
