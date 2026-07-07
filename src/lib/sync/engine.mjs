@@ -45,6 +45,9 @@ export const SYNCED_TABLES = [
   {
     name: 'subjects',
     columns: ['id', 'name', 'subject_code', 'section', 'school_year', 'semester', 'prelim_weight', 'midterm_weight', 'final_weight', 'owner_device_id', 'created_at', 'updated_at', 'deleted_at', 'purged_at', 'deleted_by_device_id'],
+    // Fields ADDED after the first release: snapshots from older app versions
+    // don't carry them — import with the schema default, never null.
+    defaults: { subject_code: '' },
   },
   {
     name: 'grading_periods',
@@ -54,6 +57,7 @@ export const SYNCED_TABLES = [
   {
     name: 'students',
     columns: ['id', 'subject_id', 'last_name', 'first_name', 'middle_name', 'suffix', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
+    defaults: { suffix: '' },
   },
   {
     name: 'assessments',
@@ -62,6 +66,7 @@ export const SYNCED_TABLES = [
   {
     name: 'assessment_columns',
     columns: ['id', 'assessment_id', 'date', 'max_score', 'attendance_source', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
+    defaults: { attendance_source: 0 },
   },
   {
     name: 'scores',
@@ -80,6 +85,7 @@ export const SYNCED_TABLES = [
   {
     name: 'group_students',
     columns: ['id', 'group_id', 'last_name', 'first_name', 'middle_name', 'suffix', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
+    defaults: { suffix: '' },
   },
 ];
 
@@ -103,10 +109,17 @@ export function rowsEqual(a, b, columns) {
   return true;
 }
 
-/** Project a row onto exactly the synced columns (drops anything extra). */
-export function pickColumns(row, columns) {
+/**
+ * Project a row onto exactly the synced columns (drops anything extra).
+ * Fields the row does not carry — snapshots from OLDER app versions predate
+ * later-added columns — are filled from `defaults` (never null into a
+ * NOT NULL column), or null for genuinely nullable fields.
+ */
+export function pickColumns(row, columns, defaults = {}) {
   const out = {};
-  for (const c of columns) out[c] = row[c] === undefined ? null : row[c];
+  for (const c of columns) {
+    out[c] = row[c] === undefined ? (defaults[c] ?? null) : row[c];
+  }
   return out;
 }
 
@@ -137,7 +150,7 @@ export function mergeTable(table, localRows, peerRows, { localDeviceId, peerDevi
   const rejects = [];
   for (const peerRaw of peerRows || []) {
     if (!peerRaw || !peerRaw.id) continue; // malformed row: skip defensively
-    const peerRow = pickColumns(peerRaw, table.columns);
+    const peerRow = pickColumns(peerRaw, table.columns, table.defaults);
     const local = localByKey.get(rowKey(table, peerRow));
     if (!local) {
       inserts.push(peerRow);

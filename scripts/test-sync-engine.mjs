@@ -209,5 +209,35 @@ const cellRow = (over = {}) => ({
   t('period twins converge by (subject, type)', d.inserts.length === 0 && d.updates.length === 1 && d.updates[0].id === 'p-b');
 }
 
+// ---- 8. forward compatibility: snapshots from OLDER app versions ------------
+// A peer that has not updated yet exports rows WITHOUT later-added fields
+// (subject_code, suffix, attendance_source). Importing them must fill the
+// schema defaults — never null into a NOT NULL column (this exact gap caused
+// "apply-failed: NOT NULL constraint failed: subjects.subject_code" during a
+// mixed-version window).
+{
+  const oldSubject = { // as exported before subject_code existed
+    id: 's9', name: 'Old App Subject', section: 'X', school_year: '2026-2027', semester: '1st',
+    prelim_weight: 30, midterm_weight: 30, final_weight: 40,
+    owner_device_id: B, created_at: '2026-07-01T00:00:00.000Z',
+    updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null,
+  };
+  const d = mergeTable(SUBJECTS, [], [oldSubject], ctxOnA);
+  t('old snapshot: missing subject_code imports as \'\' (not null)',
+    d.inserts.length === 1 && d.inserts[0].subject_code === '');
+  t('old snapshot: nullable later fields stay null',
+    d.inserts[0].purged_at === null && d.inserts[0].deleted_by_device_id === null);
+
+  const STUDENTS = SYNCED_TABLES.find(x => x.name === 'students');
+  const oldStudent = { id: 'st9', subject_id: 's9', last_name: 'Cruz', first_name: 'Ana', middle_name: '', sort_order: 0, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null };
+  const ds = mergeTable(STUDENTS, [], [oldStudent], ctxOnA);
+  t('old snapshot: missing suffix imports as \'\'', ds.inserts[0].suffix === '');
+
+  const COLUMNS = SYNCED_TABLES.find(x => x.name === 'assessment_columns');
+  const oldCol = { id: 'c9', assessment_id: 'a9', date: '2026-07-01', max_score: 10, sort_order: 0, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null };
+  const dc = mergeTable(COLUMNS, [], [oldCol], ctxOnA);
+  t('old snapshot: missing attendance_source imports as 0', dc.inserts[0].attendance_source === 0);
+}
+
 console.log(failures === 0 ? '\nALL ENGINE TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
