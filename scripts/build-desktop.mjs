@@ -251,6 +251,27 @@ if (process.argv.includes('--no-pack')) {
 const icoPath = path.join(root, 'build', 'icon.ico');
 fs.writeFileSync(icoPath, Buffer.from(fs.readFileSync(path.join(root, 'build', 'icon.b64'), 'utf8'), 'base64'));
 console.log('\n→ refreshed build/icon.ico from build/icon.b64');
+// Publishing a NON-draft GitHub release requires the version's git tag to
+// already exist in the repository (GitHub rejects it otherwise with
+// "Published releases must have a valid tag"). Create and push it here so
+// releasing stays one command. Idempotent: an existing tag is fine.
+if (publishing) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const tag = `v${pkg.version}`;
+  const gh = (pkg.build?.publish || [])[0] || {};
+  const scrub = (s) => String(s || '').replaceAll(process.env.GH_TOKEN, '***');
+  console.log(`\n→ ensuring git tag ${tag} exists on GitHub (published releases require it)`);
+  spawnSync('git', ['tag', tag], { cwd: root, stdio: 'ignore' }); // no-op if it exists
+  const pushUrl = `https://x-access-token:${process.env.GH_TOKEN}@github.com/${gh.owner}/${gh.repo}.git`;
+  const pushed = spawnSync('git', ['push', pushUrl, tag], { cwd: root, stdio: 'pipe' });
+  const pushOut = scrub(pushed.stdout) + scrub(pushed.stderr);
+  if (pushed.status !== 0 && !/already exists|up to date/i.test(pushOut)) {
+    console.error(`Could not push the ${tag} tag to GitHub:\n${pushOut}`);
+    process.exit(1);
+  }
+  console.log(`  tag ${tag} is on GitHub`);
+}
+
 const builderArgs = process.argv.includes('--dir')
   ? ['--dir']
   : ['--win', 'nsis', '--x64', '--publish', publishing ? 'always' : 'never'];
