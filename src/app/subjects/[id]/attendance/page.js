@@ -278,7 +278,6 @@ function AttendanceContent() {
                 <span className="text-xs text-gray-400 w-6 shrink-0">{idx + 1}</span>
                 <span className="flex-1 text-sm text-gray-800">
                   {displayName(student)}
-                  {student.middle_name ? ` ${student.middle_name.charAt(0)}.` : ''}
                 </span>
                 <div className="flex gap-1">
                   {STATUS_OPTIONS.map(opt => {

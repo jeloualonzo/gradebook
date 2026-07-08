@@ -7,13 +7,15 @@ import Toast from '@/components/Toast';
 import StudentForm from '@/components/StudentForm';
 import { displayName, searchText } from '@/lib/names';
 import GroupForm from '@/components/GroupForm';
+import CaseActionsBar from '@/components/CaseActionsBar';
+import { applyCase } from '@/lib/textCase';
 import ExcelImportDialog from '@/components/ExcelImportDialog';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
 /** Draggable table row for a group student. */
-function SortableStudentRow({ student, index, dragDisabled, onEdit, onDelete }) {
+function SortableStudentRow({ student, index, dragDisabled, onEdit, onDelete, checked, onToggle }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: student.id,
     disabled: dragDisabled,
@@ -26,6 +28,9 @@ function SortableStudentRow({ student, index, dragDisabled, onEdit, onDelete }) 
       style={style}
       className={`border-b border-gray-50 hover:bg-gray-50 ${isDragging ? 'opacity-60 bg-blue-50 relative z-10' : ''}`}
     >
+      <td className="px-2 py-1.5 w-8">
+        <input type="checkbox" checked={checked} onChange={onToggle} onPointerDown={e => e.stopPropagation()} />
+      </td>
       <td className="px-2 py-1.5 w-8">
         <span
           {...attributes}
@@ -72,6 +77,9 @@ export default function GroupDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
+  // Excel-style bulk cleanup: select members, change their name casing at once.
+  const [selected, setSelected] = useState(() => new Set());
+  const [caseBusy, setCaseBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -160,6 +168,34 @@ export default function GroupDetailPage() {
     setEditGroupOpen(false);
     showToast('Group updated');
     fetchGroup();
+  };
+
+  const toggleSelected = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  // Apply a case mode to the selected members' NAME fields (suffixes like
+  // "Jr." or "III" are deliberately left untouched).
+  const applyCaseToSelected = async (modeId) => {
+    setCaseBusy(true);
+    const targets = students.filter(st => selected.has(st.id));
+    for (const st of targets) {
+      await fetch(`/api/group-students/${st.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          last_name: applyCase(st.last_name, modeId),
+          first_name: applyCase(st.first_name, modeId),
+          middle_name: applyCase(st.middle_name || '', modeId),
+          suffix: st.suffix || '',
+        }),
+      });
+    }
+    setCaseBusy(false);
+    setSelected(new Set());
+    refreshStudents();
   };
 
   const handleDragEnd = async (event) => {
@@ -256,6 +292,13 @@ export default function GroupDetailPage() {
           />
         </div>
 
+        <CaseActionsBar
+          count={selected.size}
+          busy={caseBusy}
+          onApply={applyCaseToSelected}
+          onClear={() => setSelected(new Set())}
+        />
+
         <div className="bg-white border border-gray-100 rounded-lg overflow-hidden">
           {filtered.length === 0 ? (
             <div className="py-12 text-center text-sm text-gray-400">
@@ -268,6 +311,16 @@ export default function GroupDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="w-8 px-2 py-2">
+                      <input
+                        type="checkbox"
+                        checked={filtered.length > 0 && filtered.every(st => selected.has(st.id))}
+                        onChange={() => setSelected(
+                          filtered.every(st => selected.has(st.id)) ? new Set() : new Set(filtered.map(st => st.id))
+                        )}
+                        title="Select all"
+                      />
+                    </th>
                     <th className="w-8" />
                     <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-10">#</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Name</th>
@@ -278,6 +331,8 @@ export default function GroupDetailPage() {
                   <SortableContext items={filtered.map(s => s.id)} strategy={verticalListSortingStrategy}>
                     {filtered.map((s, i) => (
                       <SortableStudentRow
+                        checked={selected.has(student.id)}
+                        onToggle={() => toggleSelected(student.id)}
                         key={s.id}
                         student={s}
                         index={i}

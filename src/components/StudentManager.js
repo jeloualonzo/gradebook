@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import { displayName, searchText } from '@/lib/names';
 import Modal from './Modal';
+import CaseActionsBar from './CaseActionsBar';
+import { applyCase } from '@/lib/textCase';
 import ConfirmDialog from './ConfirmDialog';
 import StudentForm from './StudentForm';
 
@@ -12,6 +14,9 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  // Excel-style bulk cleanup: select rows, change their name casing at once.
+  const [selected, setSelected] = useState(() => new Set());
+  const [caseBusy, setCaseBusy] = useState(false);
   // Save the current roster as a reusable Student Group (a copy).
   const [groupOpen, setGroupOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
@@ -98,6 +103,36 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
     onRefresh();
   };
 
+  const toggleSelected = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allFilteredSelected = filtered.length > 0 && filtered.every(s => selected.has(s.id));
+  const toggleAll = () => setSelected(allFilteredSelected ? new Set() : new Set(filtered.map(s => s.id)));
+
+  // Apply a case mode to the selected students' NAME fields (suffixes like
+  // "Jr." or "III" are deliberately left untouched).
+  const applyCaseToSelected = async (modeId) => {
+    setCaseBusy(true);
+    const targets = students.filter(s => selected.has(s.id));
+    for (const s of targets) {
+      await fetch(`/api/students/${s.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          last_name: applyCase(s.last_name, modeId),
+          first_name: applyCase(s.first_name, modeId),
+          middle_name: applyCase(s.middle_name || '', modeId),
+          suffix: s.suffix || '',
+        }),
+      });
+    }
+    setCaseBusy(false);
+    setSelected(new Set());
+    onRefresh();
+  };
+
   return (
     <div>
       <div className="flex items-center gap-2 mb-3">
@@ -118,6 +153,13 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
         </button>
       </div>
 
+      <CaseActionsBar
+        count={selected.size}
+        busy={caseBusy}
+        onApply={applyCaseToSelected}
+        onClear={() => setSelected(new Set())}
+      />
+
       <div className="max-h-64 overflow-y-auto border border-gray-100 rounded-lg">
         {filtered.length === 0 ? (
           <div className="py-8 text-center text-sm text-gray-400">
@@ -127,6 +169,9 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="w-8 px-2 py-2">
+                  <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} title="Select all" />
+                </th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">#</th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Name</th>
                 <th className="w-16" />
@@ -135,6 +180,9 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
             <tbody>
               {filtered.map((s, i) => (
                 <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="w-8 px-2 py-1.5">
+                    <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelected(s.id)} />
+                  </td>
                   <td className="px-3 py-1.5 text-gray-400 text-xs">{i + 1}</td>
                   <td className="px-3 py-1.5 text-gray-800">
                     {displayName(s)}

@@ -1,6 +1,7 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
 import StatusBar from '@/components/StatusBar';
+import CaseShortcut from '@/components/CaseShortcut';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -15,6 +16,7 @@ export default function RootLayout({ children }) {
       <body className="bg-gray-50 text-gray-900 min-h-screen">
         {children}
         <StatusBar />
+        <CaseShortcut />
       </body>
     </html>
   );
