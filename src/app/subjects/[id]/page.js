@@ -7,6 +7,7 @@ import { useHistory } from '@/lib/hooks/useHistory';
 import GradebookTable from '@/components/GradebookTable';
 import StudentManager from '@/components/StudentManager';
 import StudentForm from '@/components/StudentForm';
+import AddToGroupDialog from '@/components/AddToGroupDialog';
 import ImportStudentsDialog from '@/components/ImportStudentsDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Modal from '@/components/Modal';
@@ -27,6 +28,7 @@ export default function GradebookPage() {
   // Right-click actions on a student row in the grid.
   const [editStudentTarget, setEditStudentTarget] = useState(null);
   const [deleteStudentTarget, setDeleteStudentTarget] = useState(null);
+  const [addToGroupTarget, setAddToGroupTarget] = useState(null);
   const [savingStudent, setSavingStudent] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg, type = 'success') => setToast({ msg, type, k: Date.now() }), []);
@@ -34,6 +36,14 @@ export default function GradebookPage() {
   // Excel-style undo/redo (Ctrl+Z / Ctrl+Y) for gradebook edits.
   const history = useHistory({ onNotify: showToast });
   const refreshData = useCallback(() => { refreshPeriods(); refreshScores(); }, [refreshPeriods, refreshScores]);
+
+  // "Counts as attendance" mirror: the score save response says what the
+  // server wrote into Attendance — patch the grid instantly (and pull the
+  // period structure only when a brand-new attendance date column appeared).
+  const handleAttendanceApplied = useCallback((att) => {
+    updateScore(att.column_id, att.student_id, att.value);
+    if (att.column_created) refreshPeriods();
+  }, [updateScore, refreshPeriods]);
   const handleSaveError = useCallback((msg) => showToast(msg || 'Save failed — value restored.', 'error'), [showToast]);
 
   // Ref mirrors so memoized children receive STABLE getter props while still
@@ -209,6 +219,7 @@ export default function GradebookPage() {
           students={students}
           scores={scores}
           onUpdateScore={updateScore}
+          onAttendanceApplied={handleAttendanceApplied}
           onRefreshPeriods={refreshPeriods}
           onRefreshData={refreshData}
           onReorderLocal={reorderAssessmentsLocal}
@@ -220,8 +231,16 @@ export default function GradebookPage() {
           onSaveError={handleSaveError}
           onEditStudent={setEditStudentTarget}
           onDeleteStudent={setDeleteStudentTarget}
+          onAddToGroup={setAddToGroupTarget}
         />
       </div>
+
+      <AddToGroupDialog
+        open={!!addToGroupTarget}
+        student={addToGroupTarget}
+        onClose={() => setAddToGroupTarget(null)}
+        onDone={(msg) => showToast(msg)}
+      />
 
       <Modal open={studentsOpen} onClose={() => setStudentsOpen(false)} title="Manage Students" width="max-w-md">
         <StudentManager

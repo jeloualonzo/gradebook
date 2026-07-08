@@ -15,7 +15,7 @@ import { formatNumber } from '@/lib/gradeCalculator';
  *   map once, updating the computed period/final grades, and a single
  *   undo/redo history entry is recorded for the whole edit session.
  */
-function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onHistoryPush, onSaveError }) {
+function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAttendanceApplied, onHistoryPush, onSaveError }) {
   const [value, setValue] = useState(initialValue !== undefined && initialValue !== null ? formatNumber(initialValue) : '');
   const save = useAutosave();
   const inputRef = useRef(null);
@@ -48,6 +48,10 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onHi
       body: JSON.stringify({ value: v === null || v === '' ? null : parseFloat(v) }),
     });
     if (!res.ok) throw new Error('Save failed');
+    // "Counts as attendance" columns: the server may have just marked this
+    // student Present — mirror it in the grid immediately.
+    const json = await res.json().catch(() => null);
+    if (json?.attendance?.applied) onAttendanceApplied?.(json.attendance);
   };
 
   // Debounced background save with rollback on failure.

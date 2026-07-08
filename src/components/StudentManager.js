@@ -7,6 +7,7 @@ import StudentForm from './StudentForm';
 
 export default function StudentManager({ subjectId, students, onRefresh }) {
   const [open, setOpen] = useState(false);
+  const [groups, setGroups] = useState(null); // for the optional add-to-group picker
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -44,13 +45,36 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
     searchText(s).includes(search.toLowerCase())
   );
 
+  const openAdd = async () => {
+    setOpen(true);
+    if (groups === null) {
+      try {
+        const res = await fetch('/api/groups');
+        const d = await res.json();
+        setGroups(Array.isArray(d) ? d : []);
+      } catch {
+        setGroups([]);
+      }
+    }
+  };
+
   const handleAdd = async (form) => {
     setLoading(true);
+    const { add_to_group_id, ...student } = form;
     await fetch(`/api/subjects/${subjectId}/students`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(student),
     });
+    // Optional second half of the one-step workflow: mirror into a group
+    // (the group's own duplicate check keeps this safe).
+    if (add_to_group_id) {
+      await fetch(`/api/groups/${add_to_group_id}/students/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ students: [student] }),
+      }).catch(() => {});
+    }
     setLoading(false);
     setOpen(false);
     onRefresh();
@@ -84,7 +108,7 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
           onChange={e => setSearch(e.target.value)}
         />
         <button
-          onClick={() => setOpen(true)}
+          onClick={openAdd}
           className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-1.5 whitespace-nowrap"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -173,7 +197,7 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
       )}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Add Student" width="max-w-sm">
-        <StudentForm onSubmit={handleAdd} onCancel={() => setOpen(false)} loading={loading} />
+        <StudentForm onSubmit={handleAdd} onCancel={() => setOpen(false)} loading={loading} groups={groups || []} />
       </Modal>
 
       <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Student" width="max-w-sm">

@@ -42,7 +42,14 @@ export default function StatusBar() {
   const updateReady = update?.state === 'downloaded';
   const updateBusy = update?.state === 'downloading';
 
+  // Grading stays distraction-free: no status bar inside the gradebook or
+  // the quick-attendance page (/subjects/[id]…). Creating a subject
+  // (/subjects/new) keeps it.
+  if (/^\/subjects\/[^/]+/.test(pathname) && pathname !== '/subjects/new') return null;
+
   return (
+    <>
+    <div className="h-9" aria-hidden="true" /> {/* in-flow spacer so content never hides behind the fixed bar */}
     <div className="fixed bottom-0 inset-x-0 h-9 bg-white border-t border-gray-200 flex items-center justify-between px-4 z-40 text-xs">
       <Link
         href="/settings"
@@ -76,5 +83,6 @@ export default function StatusBar() {
         </span>
       </div>
     </div>
+    </>
   );
 }

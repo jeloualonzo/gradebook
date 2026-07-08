@@ -7,11 +7,13 @@ export async function PUT(request, { params }) {
     const { columnId, studentId } = resolvedParams;
     await upsertScore(columnId, studentId, value);
     // A real score on an attendance-source column marks the student Present
-    // for the same date (blank attendance only — never overwrites).
+    // for the same date (blank attendance only — never overwrites). The
+    // result rides back so the gradebook can mirror it instantly.
+    let attendance = null;
     if (value !== null && value !== undefined && value !== '') {
-      await applyAttendanceSource(columnId, studentId);
+      attendance = await applyAttendanceSource(columnId, studentId);
     }
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, attendance });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
   }

@@ -33,6 +33,7 @@ export default function GradebookTable({
   students,
   scores,
   onUpdateScore,
+  onAttendanceApplied,
   onRefreshPeriods,
   onRefreshData,
   onReorderLocal,
@@ -44,6 +45,7 @@ export default function GradebookTable({
   onSaveError,
   onEditStudent,
   onDeleteStudent,
+  onAddToGroup,
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
@@ -391,6 +393,7 @@ export default function GradebookTable({
                   className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800 truncate max-w-[180px]`}
                   onContextMenu={e => openMenu(e, [
                     { label: 'Edit student…', onClick: () => onEditStudent?.(student) },
+                    { label: 'Add to Student Group…', onClick: () => onAddToGroup?.(student) },
                     { label: 'Delete student…', danger: true, separatorBefore: true, onClick: () => onDeleteStudent?.(student) },
                   ])}
                   title="Right-click for actions"
@@ -412,6 +415,7 @@ export default function GradebookTable({
                                 initialValue={scores?.[col.id]?.[student.id]}
                                 maxScore={col.max_score}
                                 onUpdate={onUpdateScore}
+                                onAttendanceApplied={onAttendanceApplied}
                                 onHistoryPush={onHistoryPush}
                                 onSaveError={onSaveError}
                               />

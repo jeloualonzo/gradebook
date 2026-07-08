@@ -59,7 +59,7 @@ export async function bulkUpsertScores(entries) {
  *   · students with no score stay blank (never auto-marked Absent).
  */
 export async function applyAttendanceSource(columnId, studentId) {
-  db.transaction(() => {
+  return db.transaction(() => {
     const col = db.get(
       `SELECT c.id, c.date, c.attendance_source, a.period_id, a.name AS assessment_name
          FROM assessment_columns c
@@ -67,8 +67,8 @@ export async function applyAttendanceSource(columnId, studentId) {
         WHERE c.id = ? AND c.deleted_at IS NULL`,
       [columnId]
     );
-    if (!col || !col.attendance_source || !col.date) return;
-    if (String(col.assessment_name).toLowerCase() === 'attendance') return; // never self-feed
+    if (!col || !col.attendance_source || !col.date) return null;
+    if (String(col.assessment_name).toLowerCase() === 'attendance') return null; // never self-feed
 
     const attendance = db.get(
       `SELECT id FROM assessments
@@ -76,7 +76,7 @@ export async function applyAttendanceSource(columnId, studentId) {
         LIMIT 1`,
       [col.period_id]
     );
-    if (!attendance) return; // this period has no Attendance category
+    if (!attendance) return null; // this period has no Attendance category
 
     const cfg = db.get(
       'SELECT present_score FROM attendance_config WHERE period_id = ? AND deleted_at IS NULL',
@@ -85,11 +85,13 @@ export async function applyAttendanceSource(columnId, studentId) {
     const present = cfg?.present_score ?? 10;
 
     // Same-date attendance column: reuse, else create.
+    let columnCreated = false;
     let attCol = db.get(
       'SELECT id FROM assessment_columns WHERE assessment_id = ? AND date = ? AND deleted_at IS NULL LIMIT 1',
       [attendance.id, col.date]
     );
     if (!attCol) {
+      columnCreated = true;
       const now = db.now();
       const { cnt } = db.get('SELECT COUNT(*) AS cnt FROM assessment_columns WHERE assessment_id = ? AND deleted_at IS NULL', [attendance.id]);
       const newId = db.newId();
@@ -105,7 +107,9 @@ export async function applyAttendanceSource(columnId, studentId) {
       'SELECT id FROM scores WHERE column_id = ? AND student_id = ? AND deleted_at IS NULL',
       [attCol.id, studentId]
     );
-    if (existing) return;
+    if (existing) return null;
     upsertOne(attCol.id, studentId, present);
+    // Tell the caller what was written so the gradebook can mirror it live.
+    return { applied: true, column_id: attCol.id, student_id: studentId, value: present, column_created: columnCreated };
   });
 }
