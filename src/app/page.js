@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import SubjectForm from '@/components/SubjectForm';
@@ -7,6 +7,7 @@ import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import ContextMenu from '@/components/ContextMenu';
 import Toast from '@/components/Toast';
+import { useHotkey } from '@/lib/hooks/useHotkey';
 
 const SEMESTER_LABELS = { '1st': '1st Sem', '2nd': '2nd Sem', 'Summer': 'Summer' };
 
@@ -42,6 +43,13 @@ export default function HomePage() {
     (message, type = 'success') => setToast({ message, type, key: Date.now() }),
     []
   );
+
+  // F2 (Windows Explorer-style rename): edit the subject row under the mouse.
+  const hoveredRef = useRef(null);
+  useHotkey('f2', () => {
+    if (menu || editTarget || deleteTarget || needsDeviceName) return;
+    if (hoveredRef.current) setEditTarget(hoveredRef.current);
+  });
 
   const fetchSubjects = useCallback(async () => {
     try {
@@ -271,7 +279,9 @@ export default function HomePage() {
                       className="border-b border-gray-100 last:border-0 hover:bg-blue-50/50 cursor-pointer"
                       onClick={() => router.push(`/subjects/${s.id}`)}
                       onContextMenu={e => { e.preventDefault(); openMenu(e.clientX, e.clientY, subjectMenuItems(s)); }}
-                      title="Right-click for actions"
+                      onMouseEnter={() => { hoveredRef.current = s; }}
+                      onMouseLeave={() => { if (hoveredRef.current === s) hoveredRef.current = null; }}
+                      title="Click to open · right-click for actions · F2 to edit"
                     >
                       <td className="px-3 py-2 font-semibold text-blue-700 whitespace-nowrap">
                         {s.subject_code || <span className="text-gray-300 font-normal">—</span>}

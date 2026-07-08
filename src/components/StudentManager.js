@@ -4,6 +4,7 @@ import { displayName, searchText } from '@/lib/names';
 import Modal from './Modal';
 import CaseActionsBar from './CaseActionsBar';
 import { applyCase } from '@/lib/textCase';
+import { useHotkey } from '@/lib/hooks/useHotkey';
 import ConfirmDialog from './ConfirmDialog';
 import StudentForm from './StudentForm';
 
@@ -108,6 +109,15 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+
+  // F2 (Windows Explorer-style rename): with exactly one student selected,
+  // open their edit form. Double-clicking a row does the same.
+  useHotkey('f2', () => {
+    if (open || editTarget || deleteTarget || groupOpen) return;
+    if (selected.size !== 1) return;
+    const target = students.find(s => selected.has(s.id));
+    if (target) setEditTarget(target);
+  });
   const allFilteredSelected = filtered.length > 0 && filtered.every(s => selected.has(s.id));
   const toggleAll = () => setSelected(allFilteredSelected ? new Set() : new Set(filtered.map(s => s.id)));
 
@@ -179,7 +189,12 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
             </thead>
             <tbody>
               {filtered.map((s, i) => (
-                <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
+                <tr
+                  key={s.id}
+                  className="border-b border-gray-50 hover:bg-gray-50"
+                  onDoubleClick={() => setEditTarget(s)}
+                  title="Double-click to edit"
+                >
                   <td className="w-8 px-2 py-1.5">
                     <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelected(s.id)} />
                   </td>

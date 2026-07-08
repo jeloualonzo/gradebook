@@ -2,6 +2,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import StatusBar from '@/components/StatusBar';
 import CaseShortcut from '@/components/CaseShortcut';
+import GlobalShortcuts from '@/components/GlobalShortcuts';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -17,6 +18,7 @@ export default function RootLayout({ children }) {
         {children}
         <StatusBar />
         <CaseShortcut />
+        <GlobalShortcuts />
       </body>
     </html>
   );

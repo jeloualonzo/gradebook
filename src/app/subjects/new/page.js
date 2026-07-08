@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toCents, centsToNumber } from '@/lib/gradeCalculator';
+import { usePageTitle } from '@/lib/hooks/usePageTitle';
 
 const SCHOOL_YEARS = (() => {
   const years = [];
@@ -21,6 +22,8 @@ const DEFAULT_ASSESSMENTS = [
 
 export default function NewSubjectPage() {
   const router = useRouter();
+
+  usePageTitle('New Subject');
 
   const [form, setForm] = useState({
     name: '',

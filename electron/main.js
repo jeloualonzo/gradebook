@@ -12,11 +12,12 @@
  *   <userData>/backups/<timestamp>/    — automatic launch backups (kept: 14)
  *   <userData>/logs/server.log         — server output for diagnostics
  */
-const { app, BrowserWindow, utilityProcess, dialog, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, utilityProcess, dialog, shell, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { findFreePort, backupDatabase, waitForHttp } = require('./lib');
+const { createWindowState } = require('./window-state');
 
 const BACKUPS_TO_KEEP = 14;
 
@@ -208,9 +209,16 @@ async function start() {
   }
   log(`Server ready after ${Date.now() - bootStartedAt}ms`);
 
+  // Restore last session's window geometry, maximized state, and zoom —
+  // and keep tracking them from here on (VS Code-style). State lives in
+  // <userData>/window-state.json; off-screen positions are sanitized.
+  const winState = createWindowState({
+    file: path.join(userData, 'window-state.json'),
+    defaults: { width: 1280, height: 820 },
+    screen,
+  });
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...winState.windowOptions(),
     title: 'Gradebook',
     autoHideMenuBar: true,
     webPreferences: {
@@ -219,6 +227,7 @@ async function start() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+  winState.manage(mainWindow);
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
   closeLoading(); // the real window is up — retire the splash
 

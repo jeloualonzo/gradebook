@@ -14,8 +14,12 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
         </button>
         <button
           onClick={() => { onConfirm(); onClose(); }}
-          className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
-            danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+          // Focused when the dialog opens (via Modal), so Enter confirms and
+          // Esc cancels — standard desktop dialog keys. Deletes stay safe:
+          // they go to the recycle bin, not oblivion.
+          data-autofocus
+          className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+            danger ? 'bg-red-600 hover:bg-red-700 focus:ring-red-400' : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-400'
           }`}
         >
           {confirmLabel}

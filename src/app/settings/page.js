@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import SyncPanel from '@/components/SyncPanel';
 import RecycleBinPanel from '@/components/RecycleBinPanel';
 import Toast from '@/components/Toast';
+import { usePageTitle } from '@/lib/hooks/usePageTitle';
 
 const TABS = [
   { id: 'general', label: 'General' },
@@ -218,6 +219,8 @@ function SettingsContent() {
   const [tab, setTab] = useState(TABS.some(t => t.id === wanted) ? wanted : 'general');
   const [toast, setToast] = useState(null);
   const showToast = useCallback((message, type = 'success') => setToast({ message, type, key: Date.now() }), []);
+
+  usePageTitle('Settings');
 
   return (
     <div className="min-h-screen bg-gray-50">

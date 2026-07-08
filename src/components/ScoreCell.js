@@ -120,6 +120,14 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
     Array.from(target.closest('tr')?.querySelectorAll('input[data-cell="score"]') || []);
 
   const handleKeyDown = (e) => {
+    // Ctrl+Home / Ctrl+End: the very first / last cell of the whole grid
+    // (Excel-style corner jumps). Handled before the modifier guard below.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'Home' || e.key === 'End')) {
+      e.preventDefault();
+      const all = Array.from(document.querySelectorAll('input[data-cell="score"]'));
+      focusCell(e.key === 'Home' ? all[0] : all[all.length - 1]);
+      return;
+    }
     // Never shadow Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z or browser shortcuts.
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target;
@@ -179,8 +187,11 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
       }
       case 'Home':
       case 'End': {
+        // First / last STUDENT in this column — the fast vertical jump long
+        // rosters need. (Row jumps: ←/→, Tab, and PageUp/PageDown scroll;
+        // grid corners: Ctrl+Home / Ctrl+End above.)
         e.preventDefault();
-        const cells = rowCells(t);
+        const cells = columnCells();
         focusCell(e.key === 'Home' ? cells[0] : cells[cells.length - 1]);
         break;
       }

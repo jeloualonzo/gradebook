@@ -5,6 +5,8 @@ import Link from 'next/link';
 import Toast from '@/components/Toast';
 import { todayLocalISO, toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
 import { displayName } from '@/lib/names';
+import { isTypingTarget } from '@/lib/hooks/useHotkey';
+import { usePageTitle } from '@/lib/hooks/usePageTitle';
 
 const STATUS_OPTIONS = [
   { key: 'P', label: 'Present', color: 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200', activeColor: 'bg-green-600 text-white border-green-600' },
@@ -35,6 +37,10 @@ function AttendanceContent() {
   const [scores, setScores] = useState(null); // null until loaded
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  // Keyboard workflow: the highlighted student the P/L/A keys apply to.
+  const [selIdx, setSelIdx] = useState(0);
+
+  usePageTitle('Attendance');
 
   useEffect(() => {
     async function load() {
@@ -117,6 +123,37 @@ function AttendanceContent() {
     students.forEach(s => { all[s.id] = status; });
     setStatuses(all);
   };
+
+  // --- Full keyboard workflow ------------------------------------------------
+  // ↑/↓ (or Home/End) move the highlight; P / L / A mark the highlighted
+  // student and advance to the next one — call the roll without touching the
+  // mouse. Keys stay out of the way while typing in the date/config fields.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!students.length || isTypingTarget(e.target)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const clamp = (n) => Math.min(students.length - 1, Math.max(0, n));
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSelIdx(clamp(selIdx + 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setSelIdx(clamp(selIdx - 1)); }
+      else if (e.key === 'Home') { e.preventDefault(); setSelIdx(0); }
+      else if (e.key === 'End') { e.preventDefault(); setSelIdx(students.length - 1); }
+      else {
+        const status = { p: 'P', l: 'L', a: 'A' }[e.key.toLowerCase()];
+        if (!status) return;
+        e.preventDefault();
+        const cur = clamp(selIdx);
+        setStatuses(prev => ({ ...prev, [students[cur].id]: status }));
+        setSelIdx(clamp(cur + 1)); // stay in flow: next student is ready
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [students, selIdx]);
+
+  // Keep the highlighted student in view while arrowing through a long roster.
+  useEffect(() => {
+    document.querySelector(`[data-att-row="${selIdx}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [selIdx]);
 
   const saveConfig = async () => {
     await fetch(`/api/attendance/${selectedPeriodId}`, {
@@ -258,6 +295,7 @@ function AttendanceContent() {
               <span className="text-green-600 font-medium">P: {presentCount}</span>
               <span className="text-yellow-600 font-medium">L: {lateCount}</span>
               <span className="text-red-600 font-medium">A: {absentCount}</span>
+              <span className="hidden sm:inline text-[10px] text-gray-300">↑↓ move · P L A mark</span>
             </div>
             <div className="flex gap-1">
               {STATUS_OPTIONS.map(opt => (
@@ -274,7 +312,14 @@ function AttendanceContent() {
 
           <div className="divide-y divide-gray-50">
             {students.map((student, idx) => (
-              <div key={student.id} className="flex items-center px-5 py-2.5 gap-4 hover:bg-gray-50/50">
+              <div
+                key={student.id}
+                data-att-row={idx}
+                onClick={() => setSelIdx(idx)}
+                className={`flex items-center px-5 py-2.5 gap-4 ${
+                  selIdx === idx ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-gray-50/50'
+                }`}
+              >
                 <span className="text-xs text-gray-400 w-6 shrink-0">{idx + 1}</span>
                 <span className="flex-1 text-sm text-gray-800">
                   {displayName(student)}

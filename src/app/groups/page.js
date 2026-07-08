@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GroupForm from '@/components/GroupForm';
@@ -7,6 +7,8 @@ import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import ContextMenu from '@/components/ContextMenu';
 import Toast from '@/components/Toast';
+import { useHotkey } from '@/lib/hooks/useHotkey';
+import { usePageTitle } from '@/lib/hooks/usePageTitle';
 
 export default function GroupsPage() {
   const router = useRouter();
@@ -30,6 +32,15 @@ export default function GroupsPage() {
     (message, type = 'success') => setToast({ message, type, key: Date.now() }),
     []
   );
+
+  usePageTitle('Student Groups');
+
+  // F2 (Windows Explorer-style rename): edit the group row under the mouse.
+  const hoveredRef = useRef(null);
+  useHotkey('f2', () => {
+    if (menu || addOpen || editTarget || deleteTarget) return;
+    if (hoveredRef.current) setEditTarget(hoveredRef.current);
+  });
 
   const fetchGroups = useCallback(async () => {
     try {
@@ -212,7 +223,9 @@ export default function GroupsPage() {
                       className="border-b border-gray-100 last:border-0 hover:bg-blue-50/50 cursor-pointer"
                       onClick={() => router.push(`/groups/${g.id}`)}
                       onContextMenu={e => { e.preventDefault(); openMenu(e.clientX, e.clientY, groupMenuItems(g)); }}
-                      title="Right-click for actions"
+                      onMouseEnter={() => { hoveredRef.current = g; }}
+                      onMouseLeave={() => { if (hoveredRef.current === g) hoveredRef.current = null; }}
+                      title="Click to open · right-click for actions · F2 to edit"
                     >
                       <td className="px-3 py-2 text-gray-900 font-medium">{g.name}</td>
                       <td className="px-3 py-2 text-gray-500">{g.description || <span className="text-gray-300">—</span>}</td>

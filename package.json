@@ -1,6 +1,6 @@
 {
   "name": "grading-system",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "description": "Faculty Gradebook — offline-first desktop gradebook for instructors",
   "author": "Jelou Alonzo",
@@ -69,6 +69,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "exceljs": "^4.4.0",
+    "globals": "^14.0.0",
     "mysql2": "^3.22.5",
     "next": "16.2.10",
     "react": "19.2.4",

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /**
@@ -14,14 +14,53 @@ import { createPortal } from 'react-dom';
  * Rendered through a portal to <body> so it can be triggered from anywhere —
  * including table cells — without invalid-nesting issues, and it closes on
  * click-away, Escape, scroll, resize, or a right-click elsewhere.
+ *
+ * Keyboard works like a native Windows menu: ↑/↓ move the highlight
+ * (skipping disabled items, wrapping at the ends), Enter activates, Esc
+ * closes. Mouse hover moves the same highlight, so the two stay in sync.
  */
 export default function ContextMenu({ menu, onClose }) {
   const ref = useRef(null);
+  const [active, setActive] = useState(-1);
+
+  const items = (menu?.items || []).filter(Boolean);
+  // Fresh values for the (single) listener effect below.
+  const itemsRef = useRef(items);
+  const activeRef = useRef(active);
+  useEffect(() => { itemsRef.current = items; activeRef.current = active; });
+
+  // New menu → no highlight until the keyboard or mouse says otherwise.
+  // Render-time adjustment per the React docs (not an effect).
+  const [prevMenu, setPrevMenu] = useState(menu);
+  if (prevMenu !== menu) {
+    setPrevMenu(menu);
+    setActive(-1);
+  }
 
   useEffect(() => {
-    if (!menu) return;
+    if (!menu) return undefined;
     const close = () => onClose();
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      const list = itemsRef.current;
+      const enabled = list.map((it, i) => (it.disabled ? -1 : i)).filter(i => i >= 0);
+      if (enabled.length === 0) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const dir = e.key === 'ArrowDown' ? 1 : -1;
+        const pos = enabled.indexOf(activeRef.current);
+        const next = pos === -1
+          ? (dir === 1 ? enabled[0] : enabled[enabled.length - 1])
+          : enabled[(pos + dir + enabled.length) % enabled.length];
+        setActive(next);
+      } else if (e.key === 'Enter') {
+        const item = list[activeRef.current];
+        if (!item || item.disabled) return;
+        e.preventDefault();
+        onClose();
+        item.onClick?.();
+      }
+    };
     const onPointer = (e) => {
       if (ref.current && ref.current.contains(e.target)) return;
       onClose();
@@ -46,7 +85,6 @@ export default function ContextMenu({ menu, onClose }) {
 
   if (!menu || typeof document === 'undefined') return null;
 
-  const items = (menu.items || []).filter(Boolean);
   const MENU_W = 200;
   const approxH = items.length * 32 + items.filter(i => i.separatorBefore).length * 9 + 12;
   const x = Math.min(menu.x, (window.innerWidth || 1200) - MENU_W - 8);
@@ -64,14 +102,16 @@ export default function ContextMenu({ menu, onClose }) {
           <button
             type="button"
             disabled={item.disabled}
+            onMouseEnter={() => setActive(i)}
+            onMouseLeave={() => setActive(a => (a === i ? -1 : a))}
             onClick={() => {
               onClose();
               item.onClick?.();
             }}
             className={`w-full text-left px-3.5 py-1.5 text-[13px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               item.danger
-                ? 'text-red-600 hover:bg-red-50'
-                : 'text-gray-700 hover:bg-gray-50'
+                ? `text-red-600 ${active === i ? 'bg-red-50' : ''}`
+                : `text-gray-700 ${active === i ? 'bg-gray-50' : ''}`
             }`}
           >
             {item.label}

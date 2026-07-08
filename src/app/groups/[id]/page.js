@@ -9,6 +9,8 @@ import { displayName, searchText } from '@/lib/names';
 import GroupForm from '@/components/GroupForm';
 import CaseActionsBar from '@/components/CaseActionsBar';
 import { applyCase } from '@/lib/textCase';
+import { useHotkey } from '@/lib/hooks/useHotkey';
+import { usePageTitle } from '@/lib/hooks/usePageTitle';
 import ExcelImportDialog from '@/components/ExcelImportDialog';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -26,6 +28,8 @@ function SortableStudentRow({ student, index, dragDisabled, onEdit, onDelete, ch
     <tr
       ref={setNodeRef}
       style={style}
+      onDoubleClick={onEdit}
+      title="Double-click to edit"
       className={`border-b border-gray-50 hover:bg-gray-50 ${isDragging ? 'opacity-60 bg-blue-50 relative z-10' : ''}`}
     >
       <td className="px-2 py-1.5 w-8">
@@ -92,6 +96,20 @@ export default function GroupDetailPage() {
     (message, type = 'success') => setToast({ message, type, key: Date.now() }),
     []
   );
+
+  usePageTitle(group?.name || null);
+
+  // F2 (Windows Explorer-style rename): with exactly one member selected,
+  // edit that student; otherwise rename the group you're looking at.
+  const anyDialogOpen = addOpen || !!editTarget || !!deleteTarget || editGroupOpen || importOpen;
+  useHotkey('f2', () => {
+    if (anyDialogOpen || !group) return;
+    if (selected.size === 1) {
+      const target = students.find(st => selected.has(st.id));
+      if (target) { setEditTarget(target); return; }
+    }
+    setEditGroupOpen(true);
+  });
 
   const fetchGroup = useCallback(async () => {
     try {
@@ -331,11 +349,11 @@ export default function GroupDetailPage() {
                   <SortableContext items={filtered.map(s => s.id)} strategy={verticalListSortingStrategy}>
                     {filtered.map((s, i) => (
                       <SortableStudentRow
-                        checked={selected.has(student.id)}
-                        onToggle={() => toggleSelected(student.id)}
                         key={s.id}
                         student={s}
                         index={i}
+                        checked={selected.has(s.id)}
+                        onToggle={() => toggleSelected(s.id)}
                         dragDisabled={dragDisabled}
                         onEdit={() => setEditTarget(s)}
                         onDelete={() => setDeleteTarget(s)}

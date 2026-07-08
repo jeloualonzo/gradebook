@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useGradebook } from '@/lib/hooks/useGradebook';
 import { useHistory } from '@/lib/hooks/useHistory';
+import { usePageTitle } from '@/lib/hooks/usePageTitle';
 import GradebookTable from '@/components/GradebookTable';
 import StudentManager from '@/components/StudentManager';
 import StudentForm from '@/components/StudentForm';
@@ -32,6 +33,9 @@ export default function GradebookPage() {
   const [savingStudent, setSavingStudent] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg, type = 'success') => setToast({ msg, type, k: Date.now() }), []);
+
+  // Window title: "Programming Fundamentals • ACT A • Faculty Gradebook".
+  usePageTitle(subject ? `${subject.name} • ${subject.section}` : null);
 
   // Excel-style undo/redo (Ctrl+Z / Ctrl+Y) for gradebook edits.
   const history = useHistory({ onNotify: showToast });

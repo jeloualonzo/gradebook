@@ -178,6 +178,23 @@ input[type="number"] {
   background-color: #eff6ff;
 }
 
+/* --- Find a student (Ctrl+F) ------------------------------------------------
+   The current match stays amber while the find box is open — a color no
+   other row state uses, so it reads instantly over the blue hover/focus
+   tints. !important wins over those rules; score inputs paint their own
+   backgrounds, so (as with hover) they get an inset-shadow overlay that
+   keeps missing-score yellow / over-max red visible underneath. */
+.gradebook-table tbody tr.find-active-row td,
+.gradebook-table tbody tr.find-active-row td.sticky-col,
+.gradebook-table tbody tr.find-active-row td.sticky-col-2,
+.gradebook-table tbody tr.find-active-row td.grade-col,
+.gradebook-table tbody tr.find-active-row td.final-grade-col {
+  background-color: #fde68a !important;
+}
+.gradebook-table tbody tr.find-active-row .score-cell {
+  box-shadow: inset 0 0 0 9999px rgba(217, 119, 6, 0.16);
+}
+
 .period-header {
   background: #1e40af;
   color: white;

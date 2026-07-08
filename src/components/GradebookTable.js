@@ -1,8 +1,9 @@
 'use client';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import React from 'react';
 import ScoreCell from './ScoreCell';
 import ContextMenu from './ContextMenu';
+import FindStudentBar from './FindStudentBar';
 import { formatGrade, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
@@ -156,6 +157,41 @@ export default function GradebookTable({
     if (gMax > 0 && pMax > 0) { syncingScroll.current = true; g.scrollLeft = (p.scrollLeft / pMax) * gMax; }
   };
 
+  // One-click period navigation (the PRELIM/MIDTERM/FINAL buttons docked to
+  // the sticky scrollbar): scroll the grid so the period's first column
+  // lands just right of the sticky # + Name columns.
+  const jumpToPeriod = (periodId) => {
+    const grid = gridRef.current;
+    const head = grid?.querySelector(`th[data-period-head="${periodId}"]`);
+    if (!grid || !head) return;
+    const left = Math.max(0, head.offsetLeft - NUM_COL_WIDTH_PX - nameColWidth);
+    grid.scrollTo({ left, behavior: 'smooth' });
+  };
+
+  // --- F2: rename the assessment you're in ------------------------------------
+  // Windows-Explorer convention. With focus in any of a column's cells
+  // (score or max), F2 opens that assessment's name editor — the same code
+  // path as clicking the name. The Exam's name is fixed, so F2 is a no-op there.
+  const colToAssessment = useMemo(() => {
+    const m = new Map();
+    for (const period of periods) {
+      for (const a of period.assessments) {
+        for (const c of a.columns) m.set(String(c.id), a);
+      }
+    }
+    return m;
+  }, [periods]);
+  const handleGridKeyDown = useCallback((e) => {
+    if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const holder = e.target.closest?.('[data-col], [data-max-for]');
+    const colId = holder?.getAttribute('data-col') || holder?.getAttribute('data-max-for');
+    if (!colId) return;
+    const assessment = colToAssessment.get(String(colId));
+    if (!assessment || assessment.is_exam) return;
+    e.preventDefault();
+    gridRef.current?.querySelector(`[data-rename-assessment="${assessment.id}"]`)?.click();
+  }, [colToAssessment]);
+
   const handleAddAssessment = async (periodId) => {
     const name = newAssessmentName.trim();
     if (!name) return;
@@ -255,7 +291,7 @@ export default function GradebookTable({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-    <div ref={gridRef} className="overflow-x-auto w-full" onScroll={onGridScroll} onFocusCapture={handleGridFocus} onBlurCapture={handleGridBlur}>
+    <div ref={gridRef} className="overflow-x-auto w-full" onScroll={onGridScroll} onFocusCapture={handleGridFocus} onBlurCapture={handleGridBlur} onKeyDown={handleGridKeyDown}>
       <table className="gradebook-table w-max text-xs">
         {/*
           Explicit column widths (table-layout: fixed). Every assessment
@@ -299,6 +335,7 @@ export default function GradebookTable({
                 <th
                   key={period.id}
                   colSpan={colSpan}
+                  data-period-head={period.id}
                   onContextMenu={e => openMenu(e, [
                     { label: 'Add assessment…', onClick: () => setAddingAssessment(period.id) },
                   ])}
@@ -465,7 +502,7 @@ export default function GradebookTable({
             const finalGrade = computeFinalSubjectGrade(periodGrades, subject);
 
             return (
-              <tr key={student.id}>
+              <tr key={student.id} data-student-row={student.id}>
                 <td className={`${STICKY_NO} bg-white text-center text-gray-400 py-1`}>{idx + 1}</td>
                 <td
                   className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800 truncate`}
@@ -522,18 +559,38 @@ export default function GradebookTable({
       </table>
     </div>
     <ContextMenu menu={menu} onClose={closeMenu} />
-    {/* Sticky horizontal scrollbar: scroll sideways from anywhere in the
-        grid — no trip to the bottom row required. Width is configurable via
-        STICKY_SCROLLBAR_WIDTH_PX in src/lib/uiConfig.js. */}
+    {/* Ctrl+F: find a student by any part of their name. */}
+    <FindStudentBar students={students} gridRef={gridRef} />
+    {/* Sticky navigation dock: PRELIM/MIDTERM/FINAL jump buttons + the
+        horizontal scrollbar, together where sideways movement already
+        happens. Width is configurable via STICKY_SCROLLBAR_WIDTH_PX in
+        src/lib/uiConfig.js. */}
     {proxyState.visible && (
       <div
-        ref={proxyRef}
-        onScroll={onProxyScroll}
-        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 overflow-x-scroll overflow-y-hidden bg-white/95 border border-gray-200 rounded shadow-md"
-        style={{ width: `min(${STICKY_SCROLLBAR_WIDTH_PX}px, calc(100vw - 2rem))`, height: '14px' }}
-        title="Scroll the gradebook horizontally"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-stretch bg-white/95 border border-gray-200 rounded shadow-md overflow-hidden"
+        style={{ maxWidth: 'calc(100vw - 2rem)' }}
       >
-        <div style={{ width: proxyState.w, height: 1 }} />
+        <div className="flex items-stretch border-r border-gray-200">
+          {periods.map(p => (
+            <button
+              key={p.id}
+              onClick={() => jumpToPeriod(p.id)}
+              className={`px-2 text-[9px] font-bold tracking-wider leading-none hover:bg-gray-100 ${PERIOD_COLORS[p.type]?.text || 'text-gray-600'}`}
+              title={`Jump to ${p.type}`}
+            >
+              {p.type}
+            </button>
+          ))}
+        </div>
+        <div
+          ref={proxyRef}
+          onScroll={onProxyScroll}
+          className="overflow-x-scroll overflow-y-hidden"
+          style={{ width: `min(${STICKY_SCROLLBAR_WIDTH_PX}px, calc(100vw - 16rem))`, height: '14px' }}
+          title="Scroll the gradebook horizontally"
+        >
+          <div style={{ width: proxyState.w, height: 1 }} />
+        </div>
       </div>
     )}
     </DndContext>

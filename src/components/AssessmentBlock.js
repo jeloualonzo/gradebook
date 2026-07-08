@@ -405,6 +405,9 @@ function AssessmentBlock({
           ) : (
             <button
               onClick={() => setEditingName(true)}
+              // Also reachable via F2 from any cell of this assessment's
+              // columns (GradebookTable clicks this button for you).
+              data-rename-assessment={assessment.id}
               className={`text-xs font-semibold ${colors.text} hover:underline`}
             >
               {assessment.name}
