@@ -199,7 +199,7 @@ function AttendanceContent() {
         </Link>
         <div>
           <h1 className="text-base font-semibold text-gray-900">Attendance</h1>
-          <p className="text-xs text-gray-500">Quick entry</p>
+
         </div>
       </header>
 

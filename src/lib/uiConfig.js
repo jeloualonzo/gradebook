@@ -19,4 +19,10 @@ export const FINAL_GRADE_COL_WIDTH_PX = 64;
 // NOTE: NUM_COL_WIDTH_PX must match the `left` offset of `.sticky-col-2`
 // in globals.css (currently 40px) so the name column pins correctly.
 export const NUM_COL_WIDTH_PX = 40;
-export const NAME_COL_WIDTH_PX = 160;
+export const NAME_COL_WIDTH_PX = 160;          // default — user-resizable, persisted in localStorage
+export const NAME_COL_MIN_PX = 110;
+export const NAME_COL_MAX_PX = 420;
+
+// The floating horizontal scrollbar pinned near the bottom of the gradebook
+// (so you never scroll to the last student just to move sideways).
+export const STICKY_SCROLLBAR_WIDTH_PX = 500;

@@ -11,6 +11,31 @@
   box-sizing: border-box;
 }
 
+/* --- Desktop-app scrollbars --------------------------------------------------
+   Thin, light, near-square — consistent across the whole application so
+   scrolling chrome never competes with content. 10px hit area with a slimmer
+   visual thumb (transparent border + content-box clip) keeps them easy to
+   grab but unobtrusive. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d9e1;
+  border-radius: 3px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #aeb6c2;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 body {
   font-family: var(--font-inter), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

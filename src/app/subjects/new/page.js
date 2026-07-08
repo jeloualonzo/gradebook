@@ -119,7 +119,7 @@ export default function NewSubjectPage() {
         </button>
         <div>
           <h1 className="text-base font-semibold text-gray-900">New Subject</h1>
-          <p className="text-xs text-gray-500">Basic info — everything else is configured in the gradebook</p>
+
         </div>
       </header>
 

@@ -147,7 +147,6 @@ export default function GroupsPage() {
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Student Groups</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Reusable rosters you can import into any subject</p>
         </div>
         <Link
           href="/"
