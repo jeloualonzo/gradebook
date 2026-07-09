@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 
 const timeAgo = (iso) => {
   if (!iso) return 'never';
@@ -16,14 +17,12 @@ const timeAgo = (iso) => {
  * Offline-first: everything here is optional — the gradebook works
  * identically whether or not a sync folder is configured.
  */
-export default function SyncPanel({ onSynced }) {
+export default function SyncPanel({ onSynced, onConflictsChanged }) {
   const [status, setStatus] = useState(null);
   const [folder, setFolder] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState(null); // { text, kind: 'ok' | 'error' }
-  const [conflicts, setConflicts] = useState([]);
-  const [showConflicts, setShowConflicts] = useState(false);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -33,9 +32,6 @@ export default function SyncPanel({ onSynced }) {
         setStatus(d);
         setFolder(d.sync_folder || '');
       }
-      const cRes = await fetch('/api/sync/conflicts');
-      const c = await cRes.json();
-      if (cRes.ok) setConflicts(c.conflicts || []);
     } catch {
       /* non-fatal */
     }
@@ -92,12 +88,12 @@ export default function SyncPanel({ onSynced }) {
           ? 'Synced — already up to date.'
           : 'Snapshot exported. Waiting for the other laptop to sync.';
       if (newConflicts > 0) {
-        text += ` ${newConflicts} conflicting edit${newConflicts !== 1 ? 's' : ''} resolved (newest kept) — see the list below.`;
-        setShowConflicts(true);
+        text += ` ${newConflicts} conflicting edit${newConflicts !== 1 ? 's' : ''} resolved (newest kept) — open Sync Conflicts to review.`;
       }
       if (problems.length) text += ` (${problems.map(p => p.error ? `${p.status}: ${p.error}` : p.status).join(', ')})`;
       setMessage({ text, kind: newConflicts > 0 ? 'warn' : 'ok' });
       await loadStatus();
+      onConflictsChanged?.();
       if (applied > 0) onSynced?.();
     } catch (err) {
       setMessage({ text: err.message, kind: 'error' });
@@ -191,32 +187,16 @@ export default function SyncPanel({ onSynced }) {
           </div>
         )}
 
-        {/* Conflict audit: what newest-wins replaced on THIS laptop. */}
-        {conflicts.length > 0 && (
-          <div className="text-xs border border-gray-200 rounded-lg">
-            <button
-              type="button"
-              onClick={() => setShowConflicts(v => !v)}
-              className="w-full flex items-center justify-between px-3 py-2 text-gray-700 hover:bg-gray-50 rounded-lg"
-            >
-              <span className="font-medium">Resolved conflicts on this laptop ({conflicts.length})</span>
-              <span className="text-gray-400">{showConflicts ? '▴' : '▾'}</span>
-            </button>
-            {showConflicts && (
-              <div className="border-t border-gray-100 divide-y divide-gray-50 max-h-48 overflow-y-auto">
-                {conflicts.map(c => (
-                  <div key={c.id} className="px-3 py-2">
-                    <div className="font-medium text-gray-800">{c.label}</div>
-                    <div className="text-gray-600">
-                      kept <span className="font-semibold text-green-700">{c.kept}</span>
-                      <span className="text-gray-400"> ({c.kept_from}, {timeAgo(c.kept_at)})</span>
-                      {' · '}replaced <span className="font-semibold text-red-600">{c.discarded}</span>
-                      <span className="text-gray-400"> ({c.discarded_from}, {timeAgo(c.discarded_at)})</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Conflict review lives in its own tab — surface the count here. */}
+        {(status?.unreviewed_conflicts || 0) > 0 && (
+          <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3">
+            <span>
+              {status.unreviewed_conflicts} conflicting edit{status.unreviewed_conflicts !== 1 ? 's were' : ' was'} resolved
+              automatically (newest kept) — both versions are saved.
+            </span>
+            <Link href="/settings?tab=conflicts" className="font-semibold whitespace-nowrap hover:text-amber-950 underline">
+              Review
+            </Link>
           </div>
         )}
 

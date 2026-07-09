@@ -37,6 +37,23 @@ export default function GradebookPage() {
   // Window title: "Programming Fundamentals • ACT A • Faculty Gradebook".
   usePageTitle(subject ? `${subject.name} • ${subject.section}` : null);
 
+  // Conflicts in context: if sync auto-resolved edits in THIS subject and
+  // they haven't been reviewed, a small banner points at them right where
+  // the numbers live. Dismissible for the session; the Settings badge stays.
+  const [conflictCount, setConflictCount] = useState(0);
+  const [conflictsDismissed, setConflictsDismissed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/sync/conflicts?subjectId=${id}&unreviewedOnly=1&limit=200`);
+        const d = await res.json();
+        if (alive && res.ok) setConflictCount((d.conflicts || []).length);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { alive = false; };
+  }, [id]);
+
   // Excel-style undo/redo (Ctrl+Z / Ctrl+Y) for gradebook edits.
   const history = useHistory({ onNotify: showToast });
   const refreshData = useCallback(() => { refreshPeriods(); refreshScores(); }, [refreshPeriods, refreshScores]);
@@ -215,6 +232,32 @@ export default function GradebookPage() {
           </a>
         </div>
       </header>
+
+      {conflictCount > 0 && !conflictsDismissed && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center gap-3 shrink-0 text-xs text-amber-900">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-500 shrink-0">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span className="flex-1 min-w-0">
+            {conflictCount} conflicting edit{conflictCount !== 1 ? 's' : ''} in this subject
+            {conflictCount !== 1 ? ' were' : ' was'} resolved automatically by sync (newest kept).
+            Both versions are saved — you can review and restore.
+          </span>
+          <Link href="/settings?tab=conflicts" className="font-semibold underline hover:text-amber-950 whitespace-nowrap">
+            Review
+          </Link>
+          <button
+            onClick={() => setConflictsDismissed(true)}
+            className="p-0.5 text-amber-400 hover:text-amber-700"
+            title="Hide for now"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-4">
         <GradebookTable

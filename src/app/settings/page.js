@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import SyncPanel from '@/components/SyncPanel';
 import RecycleBinPanel from '@/components/RecycleBinPanel';
+import ConflictReviewPanel from '@/components/ConflictReviewPanel';
 import Toast from '@/components/Toast';
 import { usePageTitle } from '@/lib/hooks/usePageTitle';
 
 const TABS = [
   { id: 'general', label: 'General' },
   { id: 'sync', label: 'Synchronization' },
+  { id: 'conflicts', label: 'Sync Conflicts' },
   { id: 'deleted', label: 'Recently Deleted' },
   { id: 'backups', label: 'Backups' },
 ];
@@ -220,6 +222,27 @@ function SettingsContent() {
   const [toast, setToast] = useState(null);
   const showToast = useCallback((message, type = 'success') => setToast({ message, type, key: Date.now() }), []);
 
+  // Follow LATER ?tab= navigations too (badge clicks while already on
+  // Settings) — render-time adjustment per the React docs (not an effect).
+  const [prevWanted, setPrevWanted] = useState(wanted);
+  if (wanted !== prevWanted) {
+    setPrevWanted(wanted);
+    if (TABS.some(t => t.id === wanted)) setTab(wanted);
+  }
+
+  // Unreviewed-conflict count for the tab badge.
+  const [conflictCount, setConflictCount] = useState(0);
+  const refreshConflictCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sync');
+      const d = await res.json();
+      if (res.ok) setConflictCount(d.unreviewed_conflicts || 0);
+    } catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => {
+    (async () => { await refreshConflictCount(); })();
+  }, [refreshConflictCount, tab]);
+
   usePageTitle('Settings');
 
   return (
@@ -241,13 +264,18 @@ function SettingsContent() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
+              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors inline-flex items-center gap-1.5 ${
                 tab === t.id
                   ? 'border-blue-600 text-blue-700'
                   : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}
             >
               {t.label}
+              {t.id === 'conflicts' && conflictCount > 0 && (
+                <span className="min-w-[16px] h-4 px-1 text-[10px] font-bold leading-4 text-center text-white bg-amber-500 rounded-full">
+                  {conflictCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -255,9 +283,10 @@ function SettingsContent() {
         {tab === 'general' && <GeneralTab showToast={showToast} />}
         {tab === 'sync' && (
           <div className="bg-white border border-gray-200 rounded-lg p-5">
-            <SyncPanel />
+            <SyncPanel onConflictsChanged={refreshConflictCount} />
           </div>
         )}
+        {tab === 'conflicts' && <ConflictReviewPanel onChanged={refreshConflictCount} />}
         {tab === 'deleted' && <RecycleBinPanel />}
         {tab === 'backups' && <BackupsTab />}
       </main>

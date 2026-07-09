@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -91,6 +91,16 @@ export const MIGRATIONS = {
     const cols = db.prepare('PRAGMA table_info(subjects)').all().map(c => c.name);
     if (!cols.includes('subject_code')) {
       db.exec("ALTER TABLE subjects ADD COLUMN subject_code TEXT NOT NULL DEFAULT ''");
+    }
+  },
+
+  // v7 — conflict review: reviewed_at marks a sync conflict as seen/handled
+  // by the user (Settings → Sync Conflicts). LOCAL-ONLY table, so the sync
+  // snapshot schema_version is untouched — mixed app versions keep syncing.
+  7: (db) => {
+    const cols = db.prepare('PRAGMA table_info(sync_conflicts)').all().map(c => c.name);
+    if (!cols.includes('reviewed_at')) {
+      db.exec('ALTER TABLE sync_conflicts ADD COLUMN reviewed_at TEXT');
     }
   },
 };

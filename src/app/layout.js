@@ -3,6 +3,7 @@ import './globals.css';
 import StatusBar from '@/components/StatusBar';
 import CaseShortcut from '@/components/CaseShortcut';
 import GlobalShortcuts from '@/components/GlobalShortcuts';
+import ConflictWatcher from '@/components/ConflictWatcher';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -19,6 +20,7 @@ export default function RootLayout({ children }) {
         <StatusBar />
         <CaseShortcut />
         <GlobalShortcuts />
+        <ConflictWatcher />
       </body>
     </html>
   );

@@ -3,7 +3,8 @@
  * real-world two-laptop scenarios via the actual HTTP APIs, with a real
  * shared sync folder. Covers: disjoint merges, same-cell newest-wins,
  * independently-created twins (natural-key convergence), late-syncer safety,
- * repeated-alternation convergence, and the conflict audit log.
+ * repeated-alternation convergence, the conflict audit log, and the conflict
+ * review flow (unreviewed badge counts, restore-as-new-edit, mark-reviewed).
  *
  * Usage (two fresh instances + shared folder):
  *   mkdir -p /tmp/sync-lab/{a,b,share}
@@ -208,6 +209,47 @@ await must(A, 'POST', `/api/groups/${grp}/purge`);
 await sync(A); await sync(B);
 check('S9: permanent delete propagates (gone from B bin too)',
   !(await must(B, 'GET', '/api/recycle-bin')).groups.some(g => g.id === grp));
+
+// ---------- S10: conflict review — badge, restore, mark-as-reviewed ----------
+// A and B edit the same cell concurrently; B's later edit wins everywhere
+// (normal LWW). The user reviews on B — where the conflict was decided —
+// and restores A's value. The restore must behave as an ORDINARY edit:
+// win on both laptops via normal sync and log NO new conflict anywhere.
+await must(A, 'PUT', `/api/scores/${cols[1]}/${st[2]}`, { value: 3 });   // A first
+await sleep(30);
+await must(B, 'PUT', `/api/scores/${cols[1]}/${st[2]}`, { value: 4 });   // B later → wins
+await sync(A); // A publishes 3
+await sync(B); // B imports 3, keeps its later 4 → conflict decided + logged on B
+await sync(A); // A follows to 4 (informed overwrite — not a conflict on A)
+check('S10: later edit won on both laptops',
+  cell(await scores(A, subj), cols[1], st[2]) === 4 && cell(await scores(B, subj), cols[1], st[2]) === 4);
+
+const statB = await must(B, 'GET', '/api/sync');
+check('S10: B status counts 3 unreviewed conflicts (badge source)', statB.unreviewed_conflicts === 3, `got ${statB.unreviewed_conflicts}`);
+check('S10: A status stays clean', (await must(A, 'GET', '/api/sync')).unreviewed_conflicts === 0);
+
+const listB = await must(B, 'GET', `/api/sync/conflicts?subjectId=${subj}&unreviewedOnly=1`);
+check('S10: subject filter finds all three (contextual banner source)', listB.conflicts.length === 3, `got ${listB.conflicts.length}`);
+const target = listB.conflicts.find(c => c.discarded === '3' && c.kept === '4');
+check('S10: the new entry is restorable with readable context',
+  !!target && target.restorable === true && /Score of Tres, Gamma/.test(target.label));
+
+const rest = await must(B, 'POST', '/api/sync/conflicts/restore', { id: target.id });
+check('S10: restore reports what it brought back', rest.ok === true && rest.restored === '3');
+check('S10: B grid shows the restored value', cell(await scores(B, subj), cols[1], st[2]) === 3);
+check('S10: restoring marked that conflict reviewed', (await must(B, 'GET', '/api/sync')).unreviewed_conflicts === 2);
+
+await sync(B); await sync(A);
+check('S10: restored value propagates to A (plain edit, normal sync)',
+  cell(await scores(A, subj), cols[1], st[2]) === 3);
+check('S10: the restore logged NO new conflict on A', (await must(A, 'GET', '/api/sync')).unreviewed_conflicts === 0);
+check('S10: …and none on B', (await must(B, 'GET', '/api/sync')).unreviewed_conflicts === 2);
+
+const marked = await must(B, 'PUT', '/api/sync/conflicts', { all: true });
+check('S10: mark-all reviews the remaining two', marked.reviewed === 2 && marked.unreviewed === 0);
+const afterAll = await must(B, 'GET', '/api/sync/conflicts');
+check('S10: history keeps every entry, all with reviewed_at set',
+  afterAll.conflicts.length === 3 && afterAll.conflicts.every(c => !!c.reviewed_at));
 
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

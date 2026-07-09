@@ -359,24 +359,79 @@ function describeRow(tableName, row) {
   }
 }
 
-/** The most recent resolved conflicts, readable enough for the Sync dialog. */
-export function recentConflicts(limit = 20) {
+/** The subject a conflict belongs to (best-effort, for contextual banners). */
+function conflictSubjectId(tableName, row) {
+  const get = (sql, params) => { try { return db.get(sql, params); } catch { return null; } };
+  switch (tableName) {
+    case 'subjects':
+      return row.id || null;
+    case 'grading_periods':
+    case 'students':
+      return row.subject_id || null;
+    case 'assessments':
+      return get('SELECT subject_id FROM grading_periods WHERE id = ?', [row.period_id])?.subject_id || null;
+    case 'attendance_config':
+      return get('SELECT subject_id FROM grading_periods WHERE id = ?', [row.period_id])?.subject_id || null;
+    case 'assessment_columns':
+      return get(
+        `SELECT p.subject_id FROM assessments a JOIN grading_periods p ON p.id = a.period_id WHERE a.id = ?`,
+        [row.assessment_id]
+      )?.subject_id || null;
+    case 'scores':
+      return get(
+        `SELECT p.subject_id
+           FROM assessment_columns ac
+           JOIN assessments a ON a.id = ac.assessment_id
+           JOIN grading_periods p ON p.id = a.period_id
+          WHERE ac.id = ?`,
+        [row.column_id]
+      )?.subject_id || null;
+    default:
+      return null; // student groups etc. — not subject-scoped
+  }
+}
+
+/** The row a conflict decided, as it exists in the database NOW (or null). */
+function locateCurrentRow(table, winnerRow) {
+  try {
+    if (table.naturalKey) {
+      return db.get(
+        `SELECT * FROM ${table.name} WHERE ${table.naturalKey.map(c => `${c} = ?`).join(' AND ')}`,
+        table.naturalKey.map(c => winnerRow[c])
+      ) || null;
+    }
+    return db.get(`SELECT * FROM ${table.name} WHERE id = ?`, [winnerRow.id]) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolved conflicts with everything the review UI needs: readable labels,
+ * both values with laptop attribution, the owning subject (for contextual
+ * banners), review state, and whether Restore is still possible.
+ */
+export function listConflicts(limit = 100) {
   const config = db.getDeviceConfig();
   const peerLabel = (id) => config.peers?.[id]?.label || 'the other laptop';
+  const ownLabel = config.device_label || 'this laptop';
   const rows = db.all(
     'SELECT * FROM sync_conflicts ORDER BY resolved_at DESC, id DESC LIMIT ?',
-    [Math.max(1, Math.min(100, limit))]
+    [Math.max(1, Math.min(200, limit))]
   );
-  const ownLabel = config.device_label || 'this laptop';
   return rows.map(r => {
     let winnerRow = {}, loserRow = {};
     try { winnerRow = JSON.parse(r.winner_row); } catch { /* keep {} */ }
     try { loserRow = JSON.parse(r.loser_row); } catch { /* keep {} */ }
+    const table = SYNCED_TABLES.find(t => t.name === r.table_name) || null;
     const kept = describeRow(r.table_name, winnerRow);
     const discarded = describeRow(r.table_name, loserRow);
     return {
       id: r.id,
+      table_name: r.table_name,
       resolved_at: r.resolved_at,
+      reviewed_at: r.reviewed_at || null,
+      subject_id: conflictSubjectId(r.table_name, winnerRow) || conflictSubjectId(r.table_name, loserRow),
       label: kept.label,
       kept: kept.value,
       kept_from: r.winner === 'peer' ? peerLabel(r.peer_device_id) : ownLabel,
@@ -384,8 +439,59 @@ export function recentConflicts(limit = 20) {
       discarded: discarded.value,
       discarded_from: r.winner === 'peer' ? ownLabel : peerLabel(r.peer_device_id),
       discarded_at: r.loser_updated_at,
+      restorable: !!(table && locateCurrentRow(table, winnerRow)),
     };
   });
+}
+
+/** Number of conflicts awaiting review (drives the badge + toast). */
+export function unreviewedConflictCount() {
+  return db.get('SELECT COUNT(*) AS n FROM sync_conflicts WHERE reviewed_at IS NULL')?.n || 0;
+}
+
+/** Mark conflicts as reviewed. Pass { all: true } or { ids: [...] }. */
+export function markConflictsReviewed({ ids = null, all = false } = {}) {
+  const now = db.now();
+  if (all) {
+    return db.run('UPDATE sync_conflicts SET reviewed_at = ? WHERE reviewed_at IS NULL', [now]).changes;
+  }
+  let changed = 0;
+  for (const id of ids || []) {
+    changed += db.run('UPDATE sync_conflicts SET reviewed_at = ? WHERE id = ? AND reviewed_at IS NULL', [now, id]).changes;
+  }
+  return changed;
+}
+
+/**
+ * Restore the LOSING version of a conflict — as an ORDINARY NEW EDIT.
+ *
+ * The current row simply gets the discarded values back with a fresh
+ * updated_at from this device, so the restore propagates through normal
+ * sync and wins everywhere (an informed sequential edit — it will not log
+ * a new conflict on the other laptop). The merge engine is untouched.
+ * The value it replaces stays visible in this conflict entry (winner_row).
+ */
+export function restoreConflictLoser(conflictId) {
+  const r = db.get('SELECT * FROM sync_conflicts WHERE id = ?', [conflictId]);
+  if (!r) throw new Error('Conflict entry not found.');
+  const table = SYNCED_TABLES.find(t => t.name === r.table_name);
+  if (!table) throw new Error(`Unknown table: ${r.table_name}`);
+  const winnerRow = JSON.parse(r.winner_row);
+  const loserRow = JSON.parse(r.loser_row);
+  const current = locateCurrentRow(table, winnerRow);
+  if (!current) throw new Error('That row no longer exists on this laptop.');
+
+  // Everything except identity/lineage gets the discarded values back.
+  const dataCols = table.columns.filter(c => !['id', 'created_at', 'updated_at'].includes(c));
+  db.transaction(() => {
+    db.run(
+      `UPDATE ${table.name} SET ${dataCols.map(c => `${c} = ?`).join(', ')}, updated_at = ? WHERE id = ?`,
+      [...dataCols.map(c => (loserRow[c] === undefined ? null : loserRow[c])), db.now(), current.id]
+    );
+    db.run('UPDATE sync_conflicts SET reviewed_at = ? WHERE id = ?', [db.now(), conflictId]);
+  });
+  const restored = describeRow(r.table_name, loserRow);
+  return { label: restored.label, restored: restored.value };
 }
 
 export function syncStatus() {
@@ -397,6 +503,7 @@ export function syncStatus() {
     sync_folder: folder,
     folder_problem: folder ? validateSyncFolder(folder) : null,
     last_export_at: config.last_export_at || null,
+    unreviewed_conflicts: unreviewedConflictCount(),
     peers: Object.entries(config.peers || {}).map(([device_id, p]) => ({ device_id, ...p })),
   };
 }

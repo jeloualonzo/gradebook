@@ -163,7 +163,8 @@ CREATE TABLE IF NOT EXISTS sync_conflicts (
   loser_row TEXT NOT NULL,     -- JSON of the row that was discarded
   winner_updated_at TEXT,
   loser_updated_at TEXT,
-  resolved_at TEXT NOT NULL
+  resolved_at TEXT NOT NULL,
+  reviewed_at TEXT             -- set when the user reviews/restores (schema v7)
 );
 CREATE INDEX IF NOT EXISTS idx_sync_conflicts_resolved ON sync_conflicts(resolved_at);
 `;
