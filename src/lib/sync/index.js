@@ -337,6 +337,10 @@ export function runSync({ force = false } = {}) {
   }
   const imported = importPeerSnapshots(folder, { force });
   const exported = exportSnapshot(folder); // export AFTER import so the file reflects the merged state
+  // The staleness sentinel's anchor: when a full run last COMPLETED. This is
+  // deliberately different from last_export_at (which only moves when content
+  // changed) — a healthy sync of an unchanged database still counts as fresh.
+  db.patchDeviceConfig({ last_sync_run_at: db.now() });
   return { ok: true, exported, imported, synced_at: db.now() };
 }
 
@@ -809,15 +813,25 @@ export function restoreConflictLoser(conflictId) {
   return { label: restored.label, restored: restored.value };
 }
 
+// Silence longer than this with a folder configured means sync is failing
+// QUIETLY (cloud drive signed out, folder renamed…) — the one remaining way
+// two laptops could diverge for days without anyone noticing. Surfaced as
+// `stale` below and shown amber in the UI.
+const SYNC_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
 export function syncStatus() {
   const config = db.getDeviceConfig();
   const folder = config.sync_folder || null;
+  const lastRun = config.last_sync_run_at || null;
+  const runAge = lastRun ? Date.now() - Date.parse(lastRun) : Infinity;
   return {
     device_id: config.device_id,
     device_label: config.device_label,
     sync_folder: folder,
     folder_problem: folder ? validateSyncFolder(folder) : null,
     last_export_at: config.last_export_at || null,
+    last_sync_run_at: lastRun,
+    stale: !!folder && !(runAge < SYNC_STALE_AFTER_MS),
     unreviewed_conflicts: unreviewedConflictCount(),
     peers: Object.entries(config.peers || {}).map(([device_id, p]) => ({ device_id, ...p })),
   };

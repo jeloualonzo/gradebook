@@ -185,6 +185,14 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- ROADMAP Phase 1 — professional desktop feel (v1.1.0): "The Class Record"
+  splash (embedded artwork, REAL boot stages, splash→app cross-fade via
+  deferMaximize/showManaged), session restore (last subject + scroll +
+  period, device-local, Settings toggle), context-rich window titles with
+  the live grading period, Segoe UI + tabular numerals app-wide, sync
+  staleness sentinel (`stale` + `last_sync_run_at`) with the ambient
+  "Synced X ago · peer seen Y" home line, and the two-animation motion
+  vocabulary (modal pop, toast rise)
 
 **Planned / candidate next steps (discussed, not committed):**
 - End-of-semester pack: printable grade sheets/reports, semester archiving

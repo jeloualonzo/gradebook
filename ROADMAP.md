@@ -176,8 +176,8 @@ professional desktop feel over adding features.
 
 | Phase | Status | Notes |
 |---|---|---|
-| 1 — Desktop feel | **next** | Imports from later phases (agreed): Segoe UI stack + tabular numerals (P4), sync staleness sentinel + "Synced X ago" home line (P5) — cheapest "not a browser" wins and a data-safety net |
-| 2 — Excel interaction | queued | The architectural keystone; selection engine designed before dependents |
+| 1 — Desktop feel | **shipped (v1.1.0)** | Splash ("The Class Record", real stages), session restore, contextual titles, Segoe + tabular numerals (P4 import), staleness sentinel + ambient sync line (P5 import), motion trio |
+| 2 — Excel interaction | **next** | The architectural keystone; selection engine designed before dependents |
 | 3 — Teacher workflow | queued | Period-closing cluster first (missing workflow, stats, filters) |
 | 4 — Professional UI | queued | Remainder after P1 imports |
 | 5 — Productivity | queued | Menu bar, tabs, printing, digest |

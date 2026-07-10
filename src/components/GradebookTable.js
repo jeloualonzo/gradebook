@@ -40,6 +40,7 @@ export default function GradebookTable({
   periods,
   students,
   scores,
+  onVisiblePeriodChange,
   onUpdateScore,
   onAttendanceApplied,
   onRefreshPeriods,
@@ -117,7 +118,7 @@ export default function GradebookTable({
   // Double-click the divider: auto-fit to the longest student name.
   const autoFitNameColumn = () => {
     const ctx = document.createElement('canvas').getContext('2d');
-    ctx.font = '500 12px Inter, system-ui, sans-serif'; // matches the name cells
+    ctx.font = '500 12px "Segoe UI", Inter, system-ui, sans-serif'; // matches the name cells
     let max = 0;
     for (const s of students) max = Math.max(max, ctx.measureText(displayName(s)).width);
     const w = clampNameWidth(Math.ceil(max) + 34); // cell padding + breathing room
@@ -140,7 +141,73 @@ export default function GradebookTable({
     if (table) ro.observe(table);
     return () => ro.disconnect();
   }, []);
+  // --- Session restore + live period reporting (ROADMAP Phase 1) ------------
+  // Both are scroll-derived: the horizontal position is persisted per subject
+  // (device-local, like the name-column width) and the leftmost visible
+  // grading period is reported up for the window title. rAF-coalesced so a
+  // scroll never does more than one pass of work per frame.
+  const scrollFrame = useRef(null);
+  const scrollSaveTimer = useRef(null);
+  const lastReportedPeriod = useRef(null);
+  const restoredForSubject = useRef(null);
+  const scrollKey = `gb-scroll-${subject.id}`;
+
+  const reportVisiblePeriod = useCallback(() => {
+    const g = gridRef.current;
+    if (!g || !onVisiblePeriodChange) return;
+    // The period under the first column right of the sticky # + Name pane.
+    const x = g.scrollLeft + NUM_COL_WIDTH_PX + nameColWidth + 8;
+    let current = null;
+    for (const p of periods) {
+      const head = g.querySelector(`th[data-period-head="${p.id}"]`);
+      if (head && head.offsetLeft <= x) current = p.type;
+    }
+    if (current && current !== lastReportedPeriod.current) {
+      lastReportedPeriod.current = current;
+      onVisiblePeriodChange(current);
+    }
+  }, [periods, nameColWidth, onVisiblePeriodChange]);
+
+  const scheduleScrollWork = useCallback(() => {
+    if (scrollFrame.current) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      reportVisiblePeriod();
+      clearTimeout(scrollSaveTimer.current);
+      scrollSaveTimer.current = setTimeout(() => {
+        const g = gridRef.current;
+        if (!g) return;
+        try {
+          window.localStorage.setItem(scrollKey, JSON.stringify({ x: g.scrollLeft, y: window.scrollY }));
+        } catch { /* persistence is a convenience */ }
+      }, 400);
+    });
+  }, [reportVisiblePeriod, scrollKey]);
+
+  // Restore once per subject, after the grid has real content to scroll to.
+  useEffect(() => {
+    if (restoredForSubject.current === subject.id || students.length === 0) return;
+    restoredForSubject.current = subject.id;
+    let saved = null;
+    try { saved = JSON.parse(window.localStorage.getItem(scrollKey) || 'null'); } catch { /* corrupt — ignore */ }
+    requestAnimationFrame(() => {
+      const g = gridRef.current;
+      if (g && saved) {
+        g.scrollLeft = saved.x || 0;
+        window.scrollTo(0, saved.y || 0);
+      }
+      reportVisiblePeriod(); // title reflects wherever we landed
+    });
+  }, [subject.id, students.length, scrollKey, reportVisiblePeriod]);
+
+  // Vertical scrolling happens on the page, not the grid — track it too.
+  useEffect(() => {
+    window.addEventListener('scroll', scheduleScrollWork, { passive: true });
+    return () => window.removeEventListener('scroll', scheduleScrollWork);
+  }, [scheduleScrollWork]);
+
   const onGridScroll = () => {
+    scheduleScrollWork();
     if (syncingScroll.current) { syncingScroll.current = false; return; }
     const g = gridRef.current, p = proxyRef.current;
     if (!g || !p) return;

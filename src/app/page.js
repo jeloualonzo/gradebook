@@ -8,6 +8,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import ContextMenu from '@/components/ContextMenu';
 import Toast from '@/components/Toast';
 import { useHotkey } from '@/lib/hooks/useHotkey';
+import { timeAgo } from '@/lib/dateUtils';
 
 const SEMESTER_LABELS = { '1st': '1st Sem', '2nd': '2nd Sem', 'Summer': 'Summer' };
 
@@ -68,6 +69,25 @@ export default function HomePage() {
   useEffect(() => {
     (async () => { await fetchSubjects(); })();
   }, [fetchSubjects]);
+
+  // "Continue where I left off": on the FIRST navigation of this app session
+  // only, jump straight back into the last opened subject (Settings → General
+  // toggle, on by default). sessionStorage resets when the app restarts, so
+  // deliberate trips back to this list are never hijacked.
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem('gb-session-restored')) return;
+      window.sessionStorage.setItem('gb-session-restored', '1');
+      if (window.localStorage.getItem('gb-continue') === '0') return;
+      const last = window.localStorage.getItem('gb-last-subject');
+      if (!last) return;
+      (async () => {
+        // Validate first — a deleted/purged subject falls back to this list.
+        const res = await fetch(`/api/subjects/${last}`);
+        if (res.ok) router.replace(`/subjects/${last}`);
+      })();
+    } catch { /* restoring is a convenience — never block the list */ }
+  }, [router]);
 
   const loadSyncInfo = useCallback(async () => {
     try {
@@ -193,6 +213,18 @@ export default function HomePage() {
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Faculty Gradebook</h1>
+          {/* Ambient trust: one quiet line says the sync system is alive —
+              amber plain language the moment it silently is not. */}
+          {syncInfo?.sync_folder && (
+            <p className={`text-xs mt-0.5 ${syncInfo.stale ? 'text-amber-600' : 'text-gray-400'}`}>
+              {syncInfo.stale
+                ? `Not synced since ${timeAgo(syncInfo.last_sync_run_at)} — check Settings`
+                : `Synced ${timeAgo(syncInfo.last_sync_run_at)}`}
+              {(syncInfo.peers || []).filter(p => p.label).slice(0, 1).map(p => (
+                <span key={p.device_id}> · {p.label} seen {timeAgo(p.last_seen_at || p.last_sync_at)}</span>
+              ))}
+            </p>
+          )}
         </div>
         <Link
           href="/groups"

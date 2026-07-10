@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { timeAgo } from '@/lib/dateUtils';
 
 /**
  * Slim desktop-style status bar, fixed at the bottom of every page.
@@ -16,6 +17,7 @@ export default function StatusBar() {
   const pathname = usePathname();
   const [info, setInfo] = useState(null); // { device_label, version }
   const [attention, setAttention] = useState(false);
+  const [attentionWhy, setAttentionWhy] = useState(null); // plain-language reason
   const [conflicts, setConflicts] = useState(0); // unreviewed sync conflicts
   const [update, setUpdate] = useState(null); // desktop only
 
@@ -30,10 +32,18 @@ export default function StatusBar() {
         if (devRes.ok) setInfo(dev);
         if (syncRes.ok) {
           setConflicts(sync.unreviewed_conflicts || 0);
+          // Staleness beats the generic dot with a plain-language reason —
+          // a silently failing sync must never LOOK healthy.
+          const stale = !!(sync.sync_folder && sync.stale);
           setAttention(!!(
             sync.sync_folder &&
-            (sync.folder_problem || (sync.peers || []).some(p => p.clock_skew_minutes))
+            (sync.folder_problem || stale || (sync.peers || []).some(p => p.clock_skew_minutes))
           ));
+          setAttentionWhy(
+            stale
+              ? `Sync hasn't completed since ${timeAgo(sync.last_sync_run_at)} — your laptops may be out of step`
+              : sync.folder_problem || null
+          );
         }
         const u = await window.gradebookDesktop?.updateStatus?.();
         if (u && alive) setUpdate(u);
@@ -62,7 +72,7 @@ export default function StatusBar() {
         href={conflicts > 0 ? '/settings?tab=conflicts' : '/settings'}
         title={conflicts > 0
           ? `${conflicts} sync conflict${conflicts !== 1 ? 's' : ''} to review`
-          : attention ? 'Settings — sync needs attention' : 'Settings'}
+          : attention ? (attentionWhy || 'Settings — sync needs attention') : 'Settings'}
         className={`relative flex items-center gap-1.5 font-medium ${pathname === '/settings' ? 'text-blue-700' : 'text-gray-500 hover:text-gray-800'}`}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

@@ -124,9 +124,16 @@ function createWindowState({ file, defaults, screen }) {
       keeper.setZoom(win.webContents.getZoomLevel() + delta);
     },
 
-    manage(w) {
+    /**
+     * Restore state and start tracking. With { deferMaximize: true } the
+     * remembered maximized state is NOT applied here — on Windows,
+     * maximize() force-SHOWS a hidden window, which would break the splash
+     * cross-fade (the main window starts show:false and is revealed later
+     * via showManaged()).
+     */
+    manage(w, { deferMaximize = false } = {}) {
       win = w;
-      if (state.maximized) w.maximize();
+      if (state.maximized && !deferMaximize) w.maximize();
 
       // Reapply the remembered zoom on every load (see module comment).
       w.webContents.on('did-finish-load', () => {
@@ -158,6 +165,18 @@ function createWindowState({ file, defaults, screen }) {
         snapshot();
         saveStateFile(file, state);
       });
+    },
+
+    /**
+     * Reveal a window created with show:false, honoring the remembered
+     * maximized state (maximize() both shows AND maximizes a hidden window;
+     * plain windows use show()). The counterpart of deferMaximize above.
+     */
+    showManaged() {
+      if (!win || win.isDestroyed()) return;
+      if (state.maximized) win.maximize();
+      else win.show();
+      win.focus();
     },
   };
   return keeper;

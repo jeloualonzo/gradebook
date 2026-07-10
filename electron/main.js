@@ -76,25 +76,60 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000; // periodic push/pull while the app is o
 // instant feedback; this timeout only cuts off genuinely broken starts.
 const SERVER_START_TIMEOUT_MS = 90000;
 
-/** Tiny window shown IMMEDIATELY on launch, replaced by the app when ready. */
-function createLoadingWindow() {
+/**
+ * Splash window — shown IMMEDIATELY on launch, cross-faded into the app when
+ * the server answers. The content (electron/splash.html, artwork embedded as
+ * base64) paints with zero disk/network dependencies. Stage text is REAL:
+ * the main process reports what it is actually doing; nothing is faked
+ * (ROADMAP.md Phase 1, Appendix A-1).
+ */
+function createSplashWindow(dataDir) {
   const w = new BrowserWindow({
-    width: 360,
-    height: 190,
+    width: 720,
+    height: 440,
+    frame: false,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
-    autoHideMenuBar: true,
+    show: true,
+    backgroundColor: '#faf7f2', // the artwork's paper white — no flash before paint
     title: 'Gradebook',
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
-  w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html>
-    <html><body style="font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:96vh;margin:0;color:#374151;background:#f9fafb">
-      <div style="width:28px;height:28px;border:3px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;animation:s 1s linear infinite"></div>
-      <p style="font-size:13px;font-weight:500;margin:14px 0 0">Starting Gradebook…</p>
-      <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">The first open after a while can take a minute</p>
-      <style>@keyframes s{to{transform:rotate(360deg)}}</style>
-    </body></html>`));
-  return w;
+  w.loadFile(path.join(__dirname, 'splash.html'));
+
+  // Stage calls can arrive before the splash finishes loading — buffer the
+  // latest one and replay it (plus version/device) once the page is ready.
+  let ready = false;
+  let pendingStage = 'Preparing…';
+  const run = (code) => {
+    try {
+      if (!w.isDestroyed()) w.webContents.executeJavaScript(code).catch(() => {});
+    } catch { /* window already gone — never let the splash break boot */ }
+  };
+  w.webContents.on('did-finish-load', () => {
+    ready = true;
+    let device = null;
+    try {
+      device = JSON.parse(fs.readFileSync(path.join(dataDir, 'device.json'), 'utf8')).device_label || null;
+    } catch { /* first run — no identity yet */ }
+    run(`splashInit(${JSON.stringify({ version: app.getVersion(), device })})`);
+    run(`setStage(${JSON.stringify(pendingStage)})`);
+  });
+
+  return {
+    window: w,
+    stage(text) {
+      pendingStage = text;
+      if (ready) run(`setStage(${JSON.stringify(text)})`);
+    },
+    fadeOut() {
+      run('fadeOut()');
+    },
+    close() {
+      try { if (!w.isDestroyed()) w.close(); } catch { /* gone */ }
+    },
+  };
 }
 
 /**
@@ -140,10 +175,6 @@ function log(line) {
 }
 
 async function start() {
-  // Instant feedback: this window appears the moment the app launches and is
-  // replaced by the gradebook once the server answers.
-  const loadingWindow = createLoadingWindow();
-
   const userData = app.getPath('userData');
   const dataDir = path.join(userData, 'data');
   const backupsDir = path.join(userData, 'backups');
@@ -151,9 +182,14 @@ async function start() {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(logsDir, { recursive: true });
   logStream = fs.createWriteStream(path.join(logsDir, 'server.log'), { flags: 'a' });
-  const closeLoading = () => { try { if (!loadingWindow.isDestroyed()) loadingWindow.close(); } catch { /* gone */ } };
+
+  // Instant feedback: the splash appears the moment the app launches and is
+  // cross-faded into the gradebook once the server answers.
+  const splash = createSplashWindow(dataDir);
+  const closeLoading = () => splash.close();
 
   // Automatic backup BEFORE the server opens the database.
+  splash.stage('Backing up your data…');
   try {
     const dest = backupDatabase(dataDir, backupsDir, BACKUPS_TO_KEEP);
     if (dest) log(`Backup created: ${dest}`);
@@ -175,6 +211,7 @@ async function start() {
   const port = await findFreePort();
   const bootStartedAt = Date.now();
   log(`Starting server from ${serverRoot} on port ${port}`);
+  splash.stage('Starting your workspace…');
 
   serverProc = utilityProcess.fork(serverJs, [], {
     cwd: serverRoot,
@@ -196,7 +233,16 @@ async function start() {
     }
   });
 
+  // Honest waiting: after a few seconds, the stage line starts reporting
+  // elapsed time — cold starts under antivirus rescans really do take a
+  // while, and a counting number reads as alive where a frozen line reads
+  // as hung.
+  const waitTicker = setInterval(() => {
+    const s = Math.round((Date.now() - bootStartedAt) / 1000);
+    if (s >= 8) splash.stage(`Starting your workspace… ${s}s — a cold start can take a minute`);
+  }, 3000);
   const ready = await waitForHttp(`http://127.0.0.1:${port}/`, SERVER_START_TIMEOUT_MS);
+  clearInterval(waitTicker);
   if (!ready) {
     closeLoading();
     fatal(
@@ -208,6 +254,7 @@ async function start() {
     return;
   }
   log(`Server ready after ${Date.now() - bootStartedAt}ms`);
+  splash.stage('Restoring your session…');
 
   // Restore last session's window geometry, maximized state, and zoom —
   // and keep tracking them from here on (VS Code-style). State lives in
@@ -219,6 +266,7 @@ async function start() {
   });
   mainWindow = new BrowserWindow({
     ...winState.windowOptions(),
+    show: false, // revealed by the splash cross-fade below
     title: 'Gradebook',
     autoHideMenuBar: true,
     webPreferences: {
@@ -227,9 +275,27 @@ async function start() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  winState.manage(mainWindow);
+  // deferMaximize: maximize() would force-show the hidden window; the
+  // remembered maximized state is applied by showManaged() at reveal time.
+  winState.manage(mainWindow, { deferMaximize: true });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
-  closeLoading(); // the real window is up — retire the splash
+
+  // Seamless handoff: wait for the app's first paint, fade the splash out,
+  // then reveal the main window exactly as the splash disappears. The
+  // timeout is a safety net — the app must NEVER stay hidden.
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    splash.stage('Ready');
+    splash.fadeOut();
+    setTimeout(() => {
+      closeLoading();
+      winState.showManaged();
+    }, 240);
+  };
+  mainWindow.once('ready-to-show', reveal);
+  setTimeout(reveal, 10000);
 
   // Native folder picker for the sync settings dialog.
   ipcMain.handle('gradebook:pick-folder', async () => {

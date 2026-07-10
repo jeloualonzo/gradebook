@@ -33,6 +33,29 @@ export function formatDateMMDDYYYY(dateVal) {
 }
 
 /**
+ * Human relative time for TIMESTAMPS (full ISO datetimes — sync stamps,
+ * peer last-seen). Not for calendar dates; those stay string-based above.
+ *   "just now" · "4 minutes ago" · "an hour ago" · "yesterday" · "3 days ago"
+ * Falls back to MM/DD/YYYY beyond a week, 'never' for missing values.
+ */
+export function timeAgo(iso) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return 'never';
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 90) return 'a minute ago';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} minutes ago`;
+  const h = Math.round(m / 60);
+  if (h < 2) return 'an hour ago';
+  if (h < 24) return `${h} hours ago`;
+  const d = Math.round(h / 24);
+  if (d === 1) return 'yesterday';
+  if (d < 7) return `${d} days ago`;
+  return formatDateMMDDYYYY(iso);
+}
+
+/**
  * Today's date in the user's LOCAL timezone as 'YYYY-MM-DD'.
  * (`new Date().toISOString()` would give the UTC date, which can be a
  * different calendar day than the user's.)

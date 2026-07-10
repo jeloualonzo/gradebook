@@ -37,9 +37,24 @@
 }
 
 body {
-  font-family: var(--font-inter), system-ui, sans-serif;
+  /* Native-first: Segoe UI Variable on Windows 11, Segoe UI on 10; Inter
+     stays as the metric-compatible fallback for browser/dev on other OSes. */
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', var(--font-inter), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Tabular numerals everywhere: digits share one width, so score columns,
+     grades, dates, and counts align vertically like a typeset ledger. */
+  font-variant-numeric: tabular-nums;
 }
+
+/* --- Motion (the whole vocabulary — deliberately tiny) ----------------------
+   Dialogs pop in over 120ms, toasts rise over 150ms. Nothing else animates;
+   restraint is what makes the two moments read as native. */
+@keyframes gb-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes gb-pop { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes gb-toast { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.gb-fade-in { animation: gb-fade 120ms ease-out both; }
+.gb-modal-in { animation: gb-pop 120ms ease-out both; }
+.gb-toast-in { animation: gb-toast 150ms ease-out both; }
 
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {

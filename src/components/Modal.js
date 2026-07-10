@@ -85,12 +85,12 @@ export default function Modal({ open, onClose, title, children, width = 'max-w-l
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-black/40 gb-fade-in"
         onClick={onClose}
       />
       <div
         ref={ref}
-        className={`relative z-10 bg-white rounded-xl shadow-xl w-full ${width} mx-4 max-h-[90vh] flex flex-col`}
+        className={`relative z-10 bg-white rounded-xl shadow-xl w-full ${width} mx-4 max-h-[90vh] flex flex-col gb-modal-in`}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>

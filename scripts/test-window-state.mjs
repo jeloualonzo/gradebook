@@ -75,6 +75,8 @@ function stubWin({ bounds, maximized = false } = {}) {
   win.isMinimized = () => false;
   win.getNormalBounds = () => bounds;
   win.maximize = () => { max = true; win.maximizedCalled = true; };
+  win.show = () => { win.showCalled = true; };
+  win.focus = () => { win.focusCalled = true; };
   win.pressKey = (key, control = true) => {
     let prevented = false;
     win.webContents.emit('before-input-event',
@@ -124,6 +126,32 @@ const savedBack = loadState(file('s2.json'));
 check('close persists bounds', savedBack.bounds.width === 1500);
 check('close persists maximized', savedBack.maximized === true);
 check('close persists zoom', savedBack.zoomLevel === ZOOM_STEP);
+
+// deferMaximize + showManaged — the splash cross-fade contract: a window
+// created hidden must NOT be force-shown by maximize() at manage() time;
+// the remembered state is applied at reveal instead.
+console.log('deferMaximize + showManaged (splash cross-fade)');
+saveStateFile(file('s5.json'), { bounds: { x: 60, y: 40, width: 1500, height: 900 }, maximized: true, zoomLevel: 0 });
+const deferKeeper = createWindowState({ file: file('s5.json'), defaults: { width: 1280, height: 820 }, screen: screenStub });
+const hiddenWin = stubWin({ bounds: { x: 60, y: 40, width: 1500, height: 900 }, maximized: false });
+deferKeeper.manage(hiddenWin, { deferMaximize: true });
+check('deferMaximize: maximize is NOT applied at manage() time', hiddenWin.maximizedCalled !== true);
+deferKeeper.showManaged();
+check('showManaged: a remembered-maximized window reveals via maximize()',
+  hiddenWin.maximizedCalled === true && hiddenWin.showCalled !== true && hiddenWin.focusCalled === true);
+
+saveStateFile(file('s6.json'), { bounds: { x: 60, y: 40, width: 1100, height: 700 }, maximized: false, zoomLevel: 0 });
+const plainKeeper = createWindowState({ file: file('s6.json'), defaults: { width: 1280, height: 820 }, screen: screenStub });
+const plainWin = stubWin({ bounds: { x: 60, y: 40, width: 1100, height: 700 }, maximized: false });
+plainKeeper.manage(plainWin, { deferMaximize: true });
+plainKeeper.showManaged();
+check('showManaged: a plain window reveals via show()',
+  plainWin.showCalled === true && plainWin.maximizedCalled !== true);
+check('default manage() still applies maximized immediately (back-compat)', (() => {
+  const w = stubWin({ bounds: { x: 60, y: 40, width: 1100, height: 700 } });
+  deferKeeper.manage(w); // s5 state is maximized: true
+  return w.maximizedCalled === true;
+})());
 
 // Off-screen saved state → sanitized back to defaults.
 saveStateFile(file('s3.json'), { bounds: { x: 9000, y: 9000, width: 1200, height: 800 }, maximized: false, zoomLevel: 0 });

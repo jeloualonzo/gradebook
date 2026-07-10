@@ -34,8 +34,21 @@ export default function GradebookPage() {
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg, type = 'success') => setToast({ msg, type, k: Date.now() }), []);
 
-  // Window title: "Programming Fundamentals • ACT A • Faculty Gradebook".
-  usePageTitle(subject ? `${subject.name} • ${subject.section}` : null);
+  // Context-rich window title (ROADMAP Phase 1) — the visible grading period
+  // rides along as you scroll, so Alt+Tab always tells the truth:
+  // "GE 3 Living in the IT Era — BSIS 3A — PRELIM — Faculty Gradebook".
+  const [visiblePeriod, setVisiblePeriod] = useState(null);
+  usePageTitle(
+    subject
+      ? `${subject.subject_code ? `${subject.subject_code} ` : ''}${subject.name} — ${subject.section}${visiblePeriod ? ` — ${visiblePeriod}` : ''}`
+      : null
+  );
+
+  // Session restore: this is now the last-opened subject (device-local).
+  useEffect(() => {
+    if (!subject) return;
+    try { window.localStorage.setItem('gb-last-subject', String(id)); } catch { /* non-fatal */ }
+  }, [id, subject]);
 
   // Conflicts in context: if sync auto-resolved edits in THIS subject and
   // they haven't been reviewed, a small banner points at them right where
@@ -265,6 +278,7 @@ export default function GradebookPage() {
           periods={periods}
           students={students}
           scores={scores}
+          onVisiblePeriodChange={setVisiblePeriod}
           onUpdateScore={updateScore}
           onAttendanceApplied={handleAttendanceApplied}
           onRefreshPeriods={refreshPeriods}

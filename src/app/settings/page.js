@@ -39,6 +39,11 @@ function GeneralTab({ showToast }) {
   // Desktop only: application update state, refreshed while the tab is open.
   const [update, setUpdate] = useState(null);
   const [checking, setChecking] = useState(false);
+  // Session restore preference (device-local, like the name-column width).
+  const [continueOn, setContinueOn] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('gb-continue') !== '0';
+  });
 
   useEffect(() => {
     (async () => {
@@ -162,6 +167,21 @@ function GeneralTab({ showToast }) {
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
+      </Row>
+      <Row label="Continue where I left off">
+        <label className="inline-flex items-center gap-2 justify-end cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-blue-600"
+            checked={continueOn}
+            onChange={e => {
+              const on = e.target.checked;
+              setContinueOn(on);
+              try { window.localStorage.setItem('gb-continue', on ? '1' : '0'); } catch { /* non-fatal */ }
+            }}
+          />
+          <span className="text-xs text-gray-500">Reopen the last subject when the app starts</span>
+        </label>
       </Row>
       <Row label="Application version">{info?.version || '—'}</Row>
       {updateRow && <Row label="Updates">{updateRow}</Row>}
