@@ -41,10 +41,8 @@ export async function createGroup({ name, description = '' }) {
 }
 
 export async function updateGroup(id, { name, description = '' }) {
-  db.run(
-    'UPDATE student_groups SET name = ?, description = ?, updated_at = ? WHERE id = ?',
-    [name, description || '', db.now(), id]
-  );
+  // Guarded write (db.updateRow): unchanged values never re-stamp updated_at.
+  db.updateRow('student_groups', id, { name, description: description || '' });
 }
 
 export async function deleteGroup(id) {
@@ -139,10 +137,13 @@ export async function createGroupStudent(groupId, { last_name, first_name, middl
 }
 
 export async function updateGroupStudent(id, { last_name, first_name, middle_name = '', suffix = '' }) {
-  db.run(
-    'UPDATE group_students SET last_name=?, first_name=?, middle_name=?, suffix=?, updated_at=? WHERE id=?',
-    [last_name, first_name, middle_name || '', suffix || '', db.now(), id]
-  );
+  // Guarded write (db.updateRow): unchanged values never re-stamp updated_at.
+  db.updateRow('group_students', id, {
+    last_name,
+    first_name,
+    middle_name: middle_name || '',
+    suffix: suffix || '',
+  });
 }
 
 export async function deleteGroupStudent(id) {

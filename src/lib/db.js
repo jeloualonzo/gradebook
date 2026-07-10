@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { runMigrations } from './migrations';
 import { SCHEMA_SQL } from './schema.mjs';
+import { toCents } from './gradeCalculator';
 
 /**
  * SQLite storage engine — zero configuration by design.
@@ -74,6 +75,55 @@ const api = {
   /** New UUID primary key. */
   newId() {
     return crypto.randomUUID();
+  },
+  /**
+   * True when a submitted value and a stored value are the same DATA.
+   * Conservative on purpose: only clearly-equal pairs skip a write — any
+   * doubt writes exactly as before the guard existed. Numeric pairs compare
+   * through integer cents (toCents), per the house rule: never raw float
+   * comparison on scores/weights.
+   */
+  valuesEqual(a, b) {
+    const an = a === undefined ? null : a;
+    const bn = b === undefined ? null : b;
+    if (an === null || bn === null) return an === bn;
+    if (an === bn) return true;
+    const numeric = (v) =>
+      typeof v === 'number' ? isFinite(v)
+        : typeof v === 'string' && v.trim() !== '' && isFinite(Number(v));
+    if (numeric(an) && numeric(bn)) return toCents(an) === toCents(bn);
+    return false;
+  },
+  /**
+   * Guarded UPDATE-by-id — THE way to write user edits to an existing row.
+   *
+   * Compares the submitted fields against the current row and:
+   *   · writes NOTHING when no value actually changes. A save that changes
+   *     no data must not touch updated_at: a fresh stamp on unchanged
+   *     content re-enters last-write-wins and can beat a REAL edit from the
+   *     other laptop, and it used to flood the conflict review with
+   *     identical-content entries (the attendance-page re-save bug);
+   *   · otherwise updates only the changed fields, stamping updated_at once.
+   *
+   * Domain normalization (trimming, `flag ? 1 : 0`, '' defaults) stays in
+   * each query function — per-table semantics belong there; this helper owns
+   * the comparison and stamping policy so every endpoint gets the guard for
+   * free. Missing rows write nothing, exactly like the unguarded
+   * `UPDATE … WHERE id = ?` this replaces.
+   *
+   * NOT for restoreConflictLoser: a conflict restore deliberately re-stamps
+   * unchanged-looking data so it wins everywhere — that exception is
+   * documented there and must stay on a raw UPDATE.
+   */
+  updateRow(tableName, id, fields) {
+    const current = db.prepare(`SELECT * FROM ${tableName} WHERE id = ?`).get(id);
+    if (!current) return { changed: false };
+    const cols = Object.keys(fields).filter(c => !api.valuesEqual(fields[c], current[c]));
+    if (cols.length === 0) return { changed: false };
+    db.prepare(
+      `UPDATE ${tableName} SET ${cols.map(c => `${c} = ?`).join(', ')}, updated_at = ? WHERE id = ?`
+    ).run(...cols.map(c => (fields[c] === undefined ? null : fields[c])), api.now(), id);
+    return { changed: true };
   },
   /** Current timestamp — ISO-8601 UTC, lexicographically sortable (LWW key). */
   now() {

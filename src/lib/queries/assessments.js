@@ -72,15 +72,13 @@ export async function createAssessment(periodId, { name, is_exam = 0, sort_order
 }
 
 export async function updateAssessment(id, { name, sort_order, weight_percent }) {
-  const fields = [];
-  const values = [];
-  if (name !== undefined) { fields.push('name = ?'); values.push(name); }
-  if (sort_order !== undefined) { fields.push('sort_order = ?'); values.push(sort_order); }
-  if (weight_percent !== undefined) { fields.push('weight_percent = ?'); values.push(weight_percent); }
-  if (fields.length === 0) return;
-  fields.push('updated_at = ?');
-  values.push(db.now(), id);
-  db.run(`UPDATE assessments SET ${fields.join(', ')} WHERE id = ?`, values);
+  // Guarded write (db.updateRow): unchanged values never re-stamp updated_at.
+  const fields = {};
+  if (name !== undefined) fields.name = name;
+  if (sort_order !== undefined) fields.sort_order = sort_order;
+  if (weight_percent !== undefined) fields.weight_percent = weight_percent;
+  if (Object.keys(fields).length === 0) return;
+  db.updateRow('assessments', id, fields);
 }
 
 export async function deleteAssessment(id) {
@@ -154,15 +152,16 @@ export async function createColumn(assessmentId, { date = null, max_score = 100,
 }
 
 export async function updateColumn(id, { date, max_score, attendance_source }) {
-  const fields = [];
-  const values = [];
-  if (date !== undefined) { fields.push('date = ?'); values.push(date); }
-  if (max_score !== undefined) { fields.push('max_score = ?'); values.push(max_score); }
-  if (attendance_source !== undefined) { fields.push('attendance_source = ?'); values.push(attendance_source ? 1 : 0); }
-  if (fields.length === 0) return;
-  fields.push('updated_at = ?');
-  values.push(db.now(), id);
-  db.run(`UPDATE assessment_columns SET ${fields.join(', ')} WHERE id = ?`, values);
+  // Guarded write (db.updateRow): the attendance page re-PUTs max_score on
+  // EVERY re-save of an existing date — unchanged values must not re-stamp
+  // updated_at (that no-op churn produced identical-content conflict entries
+  // and could beat a real edit from the other laptop under LWW).
+  const fields = {};
+  if (date !== undefined) fields.date = date;
+  if (max_score !== undefined) fields.max_score = max_score;
+  if (attendance_source !== undefined) fields.attendance_source = attendance_source ? 1 : 0;
+  if (Object.keys(fields).length === 0) return;
+  db.updateRow('assessment_columns', id, fields);
 }
 
 /**
@@ -312,6 +311,17 @@ export async function getAttendanceConfig(periodId) {
 }
 
 export async function upsertAttendanceConfig(periodId, { present_score, late_score, absent_score }) {
+  // No-op guard (see db.updateRow): re-saving the same config — the settings
+  // form always submits on Save — must not re-stamp updated_at.
+  const existing = db.get('SELECT * FROM attendance_config WHERE period_id = ?', [periodId]);
+  if (
+    existing && !existing.deleted_at &&
+    db.valuesEqual(existing.present_score, present_score) &&
+    db.valuesEqual(existing.late_score, late_score) &&
+    db.valuesEqual(existing.absent_score, absent_score)
+  ) {
+    return;
+  }
   const now = db.now();
   db.run(
     `INSERT INTO attendance_config (id, period_id, present_score, late_score, absent_score, created_at, updated_at)

@@ -104,6 +104,12 @@ full understanding. Preferences, consistently demonstrated:
 - Visual context over technical terminology: conflicts are shown as a
   miniature gradebook with the neighbors around the cell, not as JSON rows;
   laptops have friendly names; dates render as "July 8, 2026".
+- Conflict review shows SEMANTIC conflicts only — an entry exists to demand
+  a decision. If both laptops produced identical gradebook data (no-op
+  re-saves, the same value entered twice, both deleting the same thing),
+  nothing is surfaced; timestamps, ids, and device attribution never create
+  a review item. Corollary: every entry that IS shown must display its
+  difference in the details view.
 - Empty states teach the next step in one short sentence.
 - Amber = needs attention, blue = active/informational, green = kept/success;
   red is reserved for destructive actions and errors (a FINAL grading period
@@ -171,8 +177,14 @@ full understanding. Preferences, consistently demonstrated:
 - Desktop conventions batch: dialogs (focus trap, Enter/Esc), keyboard context
   menus, dynamic window titles, Ctrl+S flush, F2 rename, Home/End, custom
   scrollbars, subtitle cleanup
-- Permanent test suites: 38 engine + 44 scenario + 14 recycle + 22 workflow +
+- Permanent test suites: 50 engine + 60 scenario + 14 recycle + 22 workflow +
   30 window-state; `no-undef` lint (caught a real shipped bug)
+- Semantic conflict review + centralized no-op write guards (v1.0.9): the
+  log only surfaces real data divergence (`sync/review.mjs`); saves that
+  change nothing no longer stamp `updated_at` (`db.updateRow` + upsert
+  guards), which also removed an LWW hazard where a ritual re-save could
+  beat a real unseen edit. Release publishing survives slow uploads
+  (streamed `node:https`, adopt-if-landed, retry)
 
 **Planned / candidate next steps (discussed, not committed):**
 - End-of-semester pack: printable grade sheets/reports, semester archiving

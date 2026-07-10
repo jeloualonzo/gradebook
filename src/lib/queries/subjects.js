@@ -20,11 +20,17 @@ export async function createSubject({ name, subject_code = '', section, school_y
 }
 
 export async function updateSubject(id, { name, subject_code = '', section, school_year, semester, prelim_weight, midterm_weight, final_weight }) {
-  db.run(
-    `UPDATE subjects SET name=?, subject_code=?, section=?, school_year=?, semester=?, prelim_weight=?, midterm_weight=?, final_weight=?, updated_at=?
-     WHERE id=?`,
-    [name, String(subject_code || '').trim(), section, school_year, semester, prelim_weight, midterm_weight, final_weight, db.now(), id]
-  );
+  // Guarded write (db.updateRow): unchanged values never re-stamp updated_at.
+  db.updateRow('subjects', id, {
+    name,
+    subject_code: String(subject_code || '').trim(),
+    section,
+    school_year,
+    semester,
+    prelim_weight,
+    midterm_weight,
+    final_weight,
+  });
 }
 
 export async function deleteSubject(id) {

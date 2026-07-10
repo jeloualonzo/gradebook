@@ -23,6 +23,14 @@ function upsertOne(columnId, studentId, value) {
     );
     return;
   }
+  // No-op guard (see db.updateRow): the attendance page re-sends EVERY
+  // student's status on save — an unchanged value on a live row must not
+  // re-stamp updated_at. Cents comparison, never raw float equality.
+  const existing = db.get(
+    'SELECT value, deleted_at FROM scores WHERE column_id = ? AND student_id = ?',
+    [columnId, studentId]
+  );
+  if (existing && !existing.deleted_at && db.valuesEqual(existing.value, value)) return;
   db.run(
     `INSERT INTO scores (id, column_id, student_id, value, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)

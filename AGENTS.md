@@ -48,6 +48,7 @@ src/lib/
   schema.mjs         CURRENT schema as ONE static SQL template literal
   migrations.js      PRAGMA user_version steps (see §6)
   sync/engine.mjs    Pure merge engine + SYNCED_TABLES registry
+  sync/review.mjs    Pure review semantics — what deserves a conflict entry
   sync/index.js      Snapshot I/O, conflict log, review/restore
   queries/*.js       SQL per domain (subjects, students, scores, groups, …)
   gradeCalculator.js Integer-cents math (toCents/centsToNumber/formatNumber)
@@ -181,6 +182,20 @@ state — everything else is ordinary propagation and stays silent. Entries in
 as JSON, so nothing is ever silently lost. No basis (first contact / pruned
 ring) → merge normally, log nothing.
 
+**Semantic conflicts only (v1.0.9, `sync/review.mjs`):** an entry is logged
+only when winner and loser differ in USER-VISIBLE data — the review page
+answers one question: "did the two laptops produce different gradebook
+data?" Bookkeeping never qualifies: `id`/`created_at`/`updated_at`, device
+attribution (`owner_device_id`, `deleted_by_device_id`), the exact
+`deleted_at`/`purged_at` timestamps (their PRESENCE — deleted vs active — is
+data and always logs), and `students.sort_order` (rosters render
+alphabetically everywhere, so the value is invisible; group members,
+assessments, and date columns keep sort_order semantic and the details view
+shows it as "Position"). Identical no-op re-saves and identical
+independently-created twins converge silently. The merge itself is
+untouched — rows still propagate on any difference, updated_at included, so
+convergence is unaffected; review.mjs is consulted by the LOGGER only.
+
 **Review & restore (v1.0.7–1.0.8):** `reviewed_at` tracks review state;
 surfaces = toast after any sync that resolved conflicts (ConflictWatcher polls
 `/api/sync` — works for startup/periodic/shutdown syncs), amber count badge on
@@ -264,8 +279,8 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 
 | Suite | What it proves | How |
 |---|---|---|
-| `test-sync-engine.mjs` (38) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence | Fixtures, no I/O |
-| `test-sync-scenarios.mjs` (44) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
+| `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
+| `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
 | `test-workflows.mjs` (22) | Group-from-subject, move-column, counts-as-attendance | Live instance (3171) |
 | `test-window-state.mjs` (30) | Bounds sanitizing, zoom clamp/persist, full manage() lifecycle | Stub Electron window |
@@ -297,6 +312,16 @@ the remote blob SHA against local `git hash-object`.
   registry so Ctrl+S can `flushAutosaves()`); failures roll back to the last
   server-confirmed value with an error toast. Commits (blur/Enter) push ONE
   undo entry per edit session via `useHistory` (Ctrl+Z/Ctrl+Y).
+- **Writes that change nothing must write nothing.** Update-by-id goes
+  through `db.updateRow` (compares submitted fields against the current row —
+  integer cents for numerics — skips entirely when nothing changed, stamps
+  `updated_at` once otherwise); the score and attendance-config upserts carry
+  the same guard, and the reorder loops always did (`AND sort_order != ?`).
+  A no-op save that re-stamps `updated_at` re-enters LWW and can beat a REAL
+  edit from the other laptop (this happened: the attendance page re-PUTs
+  `max_score` on every save). Deliberate exception: a conflict restore
+  re-stamps unchanged-looking data so it wins everywhere
+  (`restoreConflictLoser` stays on a raw UPDATE).
 - **Keyboard shortcuts** go through `useHotkey` (exact modifier matching,
   typing-target guard). App-wide keys mount once in `GlobalShortcuts`.
 - **Every UI dimension constant** lives in `src/lib/uiConfig.js`. Note the
@@ -333,7 +358,7 @@ the remote blob SHA against local `git hash-object`.
 ## 13. Never change without discussion
 
 1. **`engine.mjs` merge semantics** — LWW key, tiebreak, natural keys,
-   tombstone rules, whole-row wins. The 44-scenario lab is the contract.
+   tombstone rules, whole-row wins. The 60-scenario lab is the contract.
 2. **`updated_at` semantics** — stamped by the editing device at edit time;
    merges preserve it; restores deliberately re-stamp (that's what makes a
    restore win). Nothing else may rewrite timestamps.

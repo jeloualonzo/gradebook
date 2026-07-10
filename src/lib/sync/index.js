@@ -14,6 +14,7 @@ import {
   rowKey,
   rowsEqual,
 } from './engine.mjs';
+import { semanticallyEqual } from './review.mjs';
 
 /**
  * Snapshot transport over a shared folder (Google Drive / Dropbox / Syncthing
@@ -165,6 +166,12 @@ const CONFLICT_LOG_KEEP = 500;
  *   value was genuinely discarded here: log it (winner: 'local').
  * - Everything else is ordinary propagation or staleness — never logged.
  *
+ * SEMANTIC conflicts only (see review.mjs): an entry is written only when
+ * the two versions differ in data a teacher could actually SEE. Rows that
+ * differ merely in bookkeeping — updated_at from a no-op re-save, ids from
+ * identical independently-created twins, deletion timestamps of the same
+ * outcome — converge silently; there is no decision for a human to make.
+ *
  * With no basis (first contact, or the referenced export was pruned) there
  * is no reliable common state: nothing is logged rather than flooding the
  * log while a fresh laptop imports everything.
@@ -188,11 +195,13 @@ function logConflicts(table, decision, localState, basisTables, peerId) {
   for (const winner of decision.updates) {
     const loser = localByKey.get(rowKey(table, winner));
     if (!loser) continue;
+    if (semanticallyEqual(table, winner, loser)) continue; // same gradebook data — nothing to review
     const basisRow = basisByKey.get(rowKey(table, winner));
     if (basisRow && rowsEqual(loser, basisRow, table.columns)) continue; // we hadn't changed it
     add('peer', winner, loser);
   }
   for (const { peer, local } of decision.rejects || []) {
+    if (semanticallyEqual(table, local, peer)) continue; // same gradebook data — nothing to review
     const basisRow = basisByKey.get(rowKey(table, peer));
     if (basisRow && rowsEqual(peer, basisRow, table.columns)) continue; // peer merely stale
     add('local', local, peer);
@@ -535,6 +544,8 @@ export function conflictDetails(conflictId) {
     if (value !== undefined && value !== null && String(value).trim() !== '') context.push({ label, value: String(value) });
   };
   const yn = (v) => (v ? 'Yes' : 'No');
+  // sort_order is 0-based internally; teachers count from 1.
+  const pos = (v) => (v === null || v === undefined ? v : Number(v) + 1);
   const codeName = (m) => m && `${m.subject_code ? m.subject_code + ' — ' : ''}${m.subject || m.name}`;
 
   // Field-by-field comparison. Previous = the discarded version; Current =
@@ -632,7 +643,29 @@ export function conflictDetails(conflictId) {
         ['date', 'Date', longDate],
         ['max_score', 'Max Score', formatNumber],
         ['attendance_source', 'Counts as Attendance', yn],
+        ['sort_order', 'Position', pos],
       ]);
+      // Moved columns: the two versions can live under DIFFERENT assessments
+      // (move-column-to-subject). A bare UUID explains nothing — resolve both
+      // sides to names, and only when they actually differ (the context above
+      // already names the current assessment in the ordinary case).
+      const afterRow = current || winnerRow;
+      if (String(loserRow.assessment_id || '') !== String(afterRow.assessment_id || '')) {
+        const place = (assessmentId) => {
+          const m = get(
+            `SELECT a.name, a.is_exam, p.type AS period, s.name AS subject
+               FROM assessments a JOIN grading_periods p ON p.id = a.period_id JOIN subjects s ON s.id = p.subject_id
+              WHERE a.id = ?`, [assessmentId]);
+          return m ? `${m.is_exam ? 'Exam' : m.name} (${m.period} — ${m.subject})` : 'an unknown assessment';
+        };
+        comparison.fields.unshift({
+          key: 'assessment_id',
+          label: 'Assessment',
+          before: place(loserRow.assessment_id),
+          after: place(afterRow.assessment_id),
+          changed: true,
+        });
+      }
       break;
     }
     case 'assessments': {
@@ -645,6 +678,7 @@ export function conflictDetails(conflictId) {
       comparison = fieldComparison([
         ['name', 'Assessment Name'],
         ['weight_percent', 'Weight %', formatNumber],
+        ['sort_order', 'Position', pos],
       ]);
       break;
     }
@@ -668,6 +702,7 @@ export function conflictDetails(conflictId) {
         ['first_name', 'First Name'],
         ['middle_name', 'Middle Name'],
         ['suffix', 'Suffix'],
+        ['sort_order', 'Position', pos], // group members render by drag order
       ]);
       break;
     }

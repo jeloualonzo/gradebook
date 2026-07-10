@@ -306,5 +306,153 @@ check('S11: restored max propagates to A with no new conflicts',
   String(quizColA.max_score) === '15' && (await must(A, 'GET', '/api/sync')).unreviewed_conflicts === 0);
 check('S11: unknown conflict id → 404', (await j(B, 'GET', '/api/sync/conflicts/nope')).status === 404);
 
+// ---------- S12: SEMANTIC conflicts only + no-op write guards ----------
+// The review log answers ONE question: "did the two laptops produce
+// different gradebook data?" Two mechanisms enforce it (v1.0.9):
+//   · db.updateRow / upsert guards — a save that changes no data writes
+//     NOTHING (no updated_at stamp, so it never even enters LWW);
+//   · review.mjs — the logger suppresses entries whose two versions are
+//     identical in user-visible data (covers twins and any future no-op
+//     writer). Every legitimate conflict must keep logging exactly as
+//     before: score vs score, max vs max, renames, flags, delete vs edit.
+const unrev = async (port) => (await must(port, 'GET', '/api/sync')).unreviewed_conflicts;
+const reviewAll = async () => { await j(A, 'PUT', '/api/sync/conflicts', { all: true }); await j(B, 'PUT', '/api/sync/conflicts', { all: true }); };
+const colRow = async (port, colId) => (await must(port, 'GET', `/api/subjects/${subj}/periods`))
+  .flatMap(p => p.assessments || []).flatMap(a => a.columns || []).find(c => c.id === colId);
+const prelimA = (await must(A, 'GET', `/api/subjects/${subj}/periods`)).find(p => p.type === 'PRELIM');
+const attendanceA = prelimA.assessments.find(a => a.name === 'Attendance');
+await reviewAll();
+
+// --- S12a: write guards — an unchanged save leaves the database untouched ---
+{
+  const before = await colRow(A, cols[3]);
+  await must(A, 'PUT', `/api/columns/${cols[3]}`, { max_score: before.max_score }); // same max
+  await must(A, 'PUT', `/api/students/${st[0]}`, { last_name: 'Uno', first_name: 'Alpha', middle_name: 'A' }); // same name (S3)
+  await must(A, 'PUT', `/api/scores/${cols[3]}/${st[0]}`, { value: 6 }); // same value (S6b winner)
+  const after = await colRow(A, cols[3]);
+  check('S12a: a no-op column save does not re-stamp updated_at', after.updated_at === before.updated_at,
+    `${before.updated_at} → ${after.updated_at}`);
+  const r = await sync(A);
+  check('S12a: an all-no-op day exports NOTHING new (byte-identical state)',
+    r.data?.exported?.unchanged === true);
+}
+
+// --- S12b: the reported bug — attendance re-saved on BOTH laptops, same data ---
+{
+  const { id: attCol } = await must(A, 'POST', `/api/assessments/${attendanceA.id}/columns`,
+    { date: '2026-07-20', max_score: 10, dedupe_by_date: true });
+  await must(A, 'POST', `/api/attendance/${prelimA.id}`, { columnId: attCol, entries: st.map(s => ({ student_id: s, value: 10 })) });
+  await sync(A); await sync(B); await sync(A); // converge + fresh basis both ways
+  // Jelou re-saves at 2:12, Lyca at 3:55 — the page PUTs max_score and
+  // re-sends every status on EVERY save; nothing actually changes.
+  await must(A, 'PUT', `/api/columns/${attCol}`, { max_score: 10 });
+  await must(A, 'POST', `/api/attendance/${prelimA.id}`, { columnId: attCol, entries: st.map(s => ({ student_id: s, value: 10 })) });
+  await sleep(40);
+  await must(B, 'PUT', `/api/columns/${attCol}`, { max_score: 10 });
+  await must(B, 'POST', `/api/attendance/${prelimA.id}`, { columnId: attCol, entries: st.map(s => ({ student_id: s, value: 10 })) });
+  await sync(A); const rB = await sync(B); await sync(A);
+  const logged = (rB.data?.imported || []).reduce((n, x) => n + (x.conflicts_logged || 0), 0);
+  check('S12b: identical attendance re-saves log NO conflict anywhere',
+    logged === 0 && (await unrev(A)) === 0 && (await unrev(B)) === 0, `logged=${logged}`);
+  check('S12b: both laptops stay byte-identical', (await dump(A)) === (await dump(B)));
+}
+
+// --- S12c: identical twins (same empty cell, SAME value) — logger suppression ---
+{
+  await must(A, 'PUT', `/api/scores/${cols[3]}/${st[1]}`, { value: 7 });
+  await sleep(40);
+  await must(B, 'PUT', `/api/scores/${cols[3]}/${st[1]}`, { value: 7 }); // own twin row, same value
+  await sync(A); const rB = await sync(B); await sync(A);
+  const logged = (rB.data?.imported || []).reduce((n, x) => n + (x.conflicts_logged || 0), 0);
+  check('S12c: identical twins converge silently (id/created_at are bookkeeping)',
+    logged === 0 && (await unrev(B)) === 0);
+  check('S12c: the value survives once, on both laptops',
+    cell(await scores(A, subj), cols[3], st[1]) === 7 && cell(await scores(B, subj), cols[3], st[1]) === 7);
+}
+
+// --- S12d: every LEGITIMATE conflict still logs exactly as before ---
+{
+  // d1 — score 8 vs 9 on a known row.
+  await must(A, 'PUT', `/api/scores/${cols[3]}/${st[2]}`, { value: 4 });
+  await sync(A); await sync(B); await sync(A);
+  await must(A, 'PUT', `/api/scores/${cols[3]}/${st[2]}`, { value: 8 });
+  await sleep(40);
+  await must(B, 'PUT', `/api/scores/${cols[3]}/${st[2]}`, { value: 9 });
+  await sync(A); await sync(B); await sync(A);
+  let list = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  check('S12d: score 8 vs 9 still logs (kept 9, replaced 8)',
+    list.some(c => c.table_name === 'scores' && c.kept === '9' && c.discarded === '8'), JSON.stringify(list.map(c => [c.kept, c.discarded])));
+  await reviewAll();
+
+  // d2 — assessment renamed differently on each laptop.
+  const quizId = prelimA.assessments.find(a => a.name === 'Quiz').id;
+  await must(A, 'PUT', `/api/assessments/${quizId}`, { name: 'Seatwork' });
+  await sleep(40);
+  await must(B, 'PUT', `/api/assessments/${quizId}`, { name: 'Activities' });
+  await sync(A); await sync(B); await sync(A);
+  list = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  const rename = list.find(c => c.table_name === 'assessments');
+  check('S12d: divergent renames still log (kept Activities, replaced Seatwork)',
+    !!rename && /Activities/.test(rename.kept) && /Seatwork/.test(rename.discarded));
+  await reviewAll();
+
+  // d3 — counts-as-attendance Yes vs No (via whole-row LWW: A flips the flag,
+  // B changes max; B is later so B's row — flag still No — wins whole-row).
+  await must(A, 'PUT', `/api/columns/${cols[2]}`, { attendance_source: 1 });
+  await sleep(40);
+  await must(B, 'PUT', `/api/columns/${cols[2]}`, { max_score: 25 });
+  await sync(A); await sync(B); await sync(A);
+  list = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  const flag = list.find(c => c.table_name === 'assessment_columns');
+  check('S12d: flag-vs-max divergence still logs', !!flag);
+  const det3 = flag ? await must(B, 'GET', `/api/sync/conflicts/${flag.id}`) : null;
+  const attField = det3?.comparison?.fields?.find(f => f.key === 'attendance_source');
+  check('S12d: details show Counts as Attendance Yes → No (a real, visible difference)',
+    attField?.before === 'Yes' && attField?.after === 'No' && attField?.changed === true, JSON.stringify(attField));
+  await reviewAll();
+
+  // d4 — deleted vs edited (delete on A, later max edit on B → active row wins).
+  const { id: colX } = await must(A, 'POST', `/api/assessments/${quizId}/columns`, { date: '2026-07-25', max_score: 10 });
+  await sync(A); await sync(B); await sync(A);
+  await must(A, 'DELETE', `/api/columns/${colX}`);
+  await sleep(40);
+  await must(B, 'PUT', `/api/columns/${colX}`, { max_score: 30 });
+  await sync(A); await sync(B); await sync(A);
+  list = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  const delConf = list.find(c => c.table_name === 'assessment_columns');
+  check('S12d: deleted vs edited still logs', !!delConf);
+  const det4 = delConf ? await must(B, 'GET', `/api/sync/conflicts/${delConf.id}`) : null;
+  const statusField = det4?.comparison?.fields?.find(f => f.key === 'status');
+  check('S12d: details show Deleted vs Active', statusField?.before === 'Deleted' && statusField?.after === 'Active');
+  await reviewAll();
+
+  // d5 — BOTH laptops delete the same column: same outcome, nothing to review.
+  const { id: colY } = await must(A, 'POST', `/api/assessments/${quizId}/columns`, { date: '2026-07-26', max_score: 10 });
+  await sync(A); await sync(B); await sync(A);
+  await must(A, 'DELETE', `/api/columns/${colY}`);
+  await sleep(40);
+  await must(B, 'DELETE', `/api/columns/${colY}`);
+  await sync(A); await sync(B); await sync(A);
+  check('S12d: independent deletions of the same column log nothing (same outcome)',
+    (await unrev(A)) === 0 && (await unrev(B)) === 0);
+}
+
+// --- S12e: the LWW hazard the guards remove — a ritual no-op re-save must ---
+// --- never beat a REAL edit it hasn't seen ---
+{
+  const { id: colZ } = await must(A, 'POST', `/api/assessments/${attendanceA.id}/columns`,
+    { date: '2026-07-27', max_score: 10, dedupe_by_date: true });
+  await sync(A); await sync(B); await sync(A);
+  await must(B, 'PUT', `/api/columns/${colZ}`, { max_score: 12 }); // REAL edit, earlier
+  await sleep(40);
+  await must(A, 'PUT', `/api/columns/${colZ}`, { max_score: 10 }); // ritual no-op, LATER — writes nothing
+  await sync(A); await sync(B); await sync(A);
+  const zA = await colRow(A, colZ), zB = await colRow(B, colZ);
+  check('S12e: the REAL edit survives the later no-op re-save (guard kills the LWW hazard)',
+    String(zA?.max_score) === '12' && String(zB?.max_score) === '12', `A=${zA?.max_score} B=${zB?.max_score}`);
+  check('S12e: and it propagated as a clean, conflict-free sync',
+    (await unrev(A)) === 0 && (await unrev(B)) === 0);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

@@ -13,6 +13,7 @@ import {
   FORMAT_VERSION,
   SCHEMA_VERSION,
 } from '../src/lib/sync/engine.mjs';
+import { semanticallyEqual } from '../src/lib/sync/review.mjs';
 
 let failures = 0;
 const t = (name, cond) => {
@@ -237,6 +238,48 @@ const cellRow = (over = {}) => ({
   const oldCol = { id: 'c9', assessment_id: 'a9', date: '2026-07-01', max_score: 10, sort_order: 0, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null };
   const dc = mergeTable(COLUMNS, [], [oldCol], ctxOnA);
   t('old snapshot: missing attendance_source imports as 0', dc.inserts[0].attendance_source === 0);
+}
+
+// ---- 9. review semantics (review.mjs — pure) --------------------------------
+// The conflict review answers ONE question: "did the two laptops produce
+// different gradebook data?" These fixtures pin the boundary between
+// bookkeeping (never reviewable) and data (always reviewable). Merge
+// behavior is unaffected — review.mjs is consulted by the logger only.
+{
+  const COLUMNS = SYNCED_TABLES.find(x => x.name === 'assessment_columns');
+  const STUDENTS = SYNCED_TABLES.find(x => x.name === 'students');
+  const ASSESSMENTS = SYNCED_TABLES.find(x => x.name === 'assessments');
+  const T0 = '2026-07-08T06:00:00.000Z';
+  const T1 = '2026-07-08T06:12:00.000Z';
+  const T2 = '2026-07-08T07:55:00.000Z';
+  const col = (over = {}) => ({ id: 'c1', assessment_id: 'a1', date: '2026-07-08', max_score: 10, attendance_source: 0, sort_order: 0, created_at: T0, updated_at: T0, deleted_at: null, ...over });
+  const stu = (over = {}) => ({ id: 'st1', subject_id: 's1', last_name: 'Uno', first_name: 'Alpha', middle_name: '', suffix: '', sort_order: 0, created_at: T0, updated_at: T0, deleted_at: null, ...over });
+  const asm = (over = {}) => ({ id: 'a1', period_id: 'p1', name: 'Quiz', is_exam: 0, sort_order: 1, weight_percent: 20, created_at: T0, updated_at: T0, deleted_at: null, ...over });
+
+  t('review: updated_at alone is bookkeeping (the attendance re-save case)',
+    semanticallyEqual(COLUMNS, col({ updated_at: T2 }), col({ updated_at: T1 })));
+  t('review: identical twins (different id + created_at) are not reviewable',
+    semanticallyEqual(SCORES, cellRow(), cellRow({ id: 'id-other', created_at: T1, updated_at: T1 })));
+  t('review: score 8 vs 9 is a real conflict',
+    !semanticallyEqual(SCORES, cellRow({ value: 9, updated_at: T2 }), cellRow({ value: 8, updated_at: T1 })));
+  t('review: max score 10 vs 20 is a real conflict',
+    !semanticallyEqual(COLUMNS, col({ max_score: 20 }), col()));
+  t('review: counts-as-attendance Yes vs No is a real conflict',
+    !semanticallyEqual(COLUMNS, col({ attendance_source: 1 }), col()));
+  t('review: assessments renamed differently is a real conflict',
+    !semanticallyEqual(ASSESSMENTS, asm({ name: 'Seatwork' }), asm({ name: 'Activities' })));
+  t('review: deleted vs active is a real conflict',
+    !semanticallyEqual(COLUMNS, col({ deleted_at: T2 }), col()));
+  t('review: both deleted at different times is the same outcome — not reviewable',
+    semanticallyEqual(COLUMNS, col({ deleted_at: T1, updated_at: T1 }), col({ deleted_at: T2, updated_at: T2 })));
+  t('review: a column moved to a different assessment is a real conflict',
+    !semanticallyEqual(COLUMNS, col({ assessment_id: 'a2' }), col()));
+  t('review: column position is user-visible order — a real conflict',
+    !semanticallyEqual(COLUMNS, col({ sort_order: 3 }), col()));
+  t('review: student sort_order is invisible (rosters are alphabetical) — not reviewable',
+    semanticallyEqual(STUDENTS, stu({ sort_order: 5, updated_at: T2 }), stu()));
+  t('review: subject owner_device_id is attribution, not data',
+    semanticallyEqual(SUBJECTS, subj({ owner_device_id: B, updated_at: T2 }), subj()));
 }
 
 console.log(failures === 0 ? '\nALL ENGINE TESTS PASSED' : `\n${failures} FAILURES`);

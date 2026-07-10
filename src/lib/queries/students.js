@@ -27,10 +27,13 @@ export async function createStudent(subjectId, { last_name, first_name, middle_n
 }
 
 export async function updateStudent(id, { last_name, first_name, middle_name = '', suffix = '' }) {
-  db.run(
-    'UPDATE students SET last_name=?, first_name=?, middle_name=?, suffix=?, updated_at=? WHERE id=?',
-    [last_name, first_name, middle_name || '', suffix || '', db.now(), id]
-  );
+  // Guarded write (db.updateRow): unchanged values never re-stamp updated_at.
+  db.updateRow('students', id, {
+    last_name,
+    first_name,
+    middle_name: middle_name || '',
+    suffix: suffix || '',
+  });
 }
 
 export async function deleteStudent(id) {
