@@ -140,6 +140,100 @@ export async function purgeSubject(id) {
   if (info.changes === 0) throw new Error('This subject is not in the recycle bin.');
 }
 
+/**
+ * Semester rollover (ROADMAP Phase 3b): a NEW subject for a NEW term,
+ * carrying the teaching STRUCTURE and never the term's data.
+ *
+ *   copied : periods, attendance configs, assessments (name/order/weight),
+ *            the exam's one auto-column (the standing invariant)
+ *   never  : dated columns (dates belong to the old term) and scores
+ *   roster : 'empty' | 'copy' (this subject's students) | 'group' (a
+ *            Student Group's members) — fresh UUIDs either way
+ *
+ * One transaction, ordinary inserts with fresh ids — sync propagates it
+ * exactly like any newly created subject; grading_periods' natural keys are
+ * fresh because the subject id is.
+ */
+export async function rolloverSubject(id, {
+  name, subject_code = '', section, school_year, semester,
+  roster = 'empty', group_id = null,
+} = {}) {
+  let newSubjectId = null;
+  db.transaction(() => {
+    const src = db.get('SELECT * FROM subjects WHERE id = ? AND deleted_at IS NULL', [id]);
+    if (!src) throw new Error('Subject not found');
+    if (!name || !String(name).trim()) throw new Error('A subject name is required');
+    const now = db.now();
+    newSubjectId = db.newId();
+    db.run(
+      `INSERT INTO subjects (id, name, subject_code, section, school_year, semester, prelim_weight, midterm_weight, final_weight, owner_device_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [newSubjectId, String(name).trim(), String(subject_code || '').trim(), section, school_year, semester,
+        src.prelim_weight, src.midterm_weight, src.final_weight, db.getDeviceId(), now, now]
+    );
+
+    const periods = db.all('SELECT * FROM grading_periods WHERE subject_id = ? AND deleted_at IS NULL', [id]);
+    for (const period of periods) {
+      const newPeriodId = db.newId();
+      db.run(
+        'INSERT INTO grading_periods (id, subject_id, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [newPeriodId, newSubjectId, period.type, now, now]
+      );
+      const ac = db.get('SELECT * FROM attendance_config WHERE period_id = ? AND deleted_at IS NULL', [period.id]);
+      if (ac) {
+        db.run(
+          'INSERT INTO attendance_config (id, period_id, present_score, late_score, absent_score, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [db.newId(), newPeriodId, ac.present_score, ac.late_score, ac.absent_score, now, now]
+        );
+      }
+      const assessments = db.all(
+        'SELECT * FROM assessments WHERE period_id = ? AND deleted_at IS NULL ORDER BY is_exam, sort_order',
+        [period.id]
+      );
+      for (const assessment of assessments) {
+        const newAssessmentId = db.newId();
+        db.run(
+          'INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [newAssessmentId, newPeriodId, assessment.name, assessment.is_exam, assessment.sort_order, assessment.weight_percent, now, now]
+        );
+        // The invariant: every exam has exactly one (undated) column.
+        if (assessment.is_exam) {
+          db.run(
+            'INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, created_at, updated_at) VALUES (?, ?, NULL, ?, 0, ?, ?)',
+            [db.newId(), newAssessmentId, 100, now, now]
+          );
+        }
+      }
+    }
+
+    // Roster — fresh student rows (new UUIDs, no scores travel).
+    let sourceNames = [];
+    if (roster === 'copy') {
+      sourceNames = db.all(
+        `SELECT last_name, first_name, middle_name, suffix FROM students
+          WHERE subject_id = ? AND deleted_at IS NULL
+          ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
+        [id]
+      );
+    } else if (roster === 'group') {
+      if (!group_id) throw new Error('A Student Group is required for the group roster option');
+      sourceNames = db.all(
+        `SELECT last_name, first_name, middle_name, suffix FROM group_students
+          WHERE group_id = ? AND deleted_at IS NULL
+          ORDER BY sort_order, last_name COLLATE NOCASE, first_name COLLATE NOCASE`,
+        [group_id]
+      );
+    }
+    sourceNames.forEach((s, i) => {
+      db.run(
+        'INSERT INTO students (id, subject_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [db.newId(), newSubjectId, s.last_name, s.first_name, s.middle_name || '', s.suffix || '', i, now, now]
+      );
+    });
+  });
+  return newSubjectId;
+}
+
 export async function duplicateSubject(id) {
   let newSubjectId = null;
   db.transaction(() => {

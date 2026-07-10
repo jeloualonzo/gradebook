@@ -15,6 +15,7 @@ import ImportStudentsDialog from '@/components/ImportStudentsDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Modal from '@/components/Modal';
 import Toast from '@/components/Toast';
+import StudentFocusPanel from '@/components/StudentFocusPanel';
 
 export default function GradebookPage() {
   const { id } = useParams();
@@ -32,6 +33,7 @@ export default function GradebookPage() {
   const [editStudentTarget, setEditStudentTarget] = useState(null);
   const [deleteStudentTarget, setDeleteStudentTarget] = useState(null);
   const [addToGroupTarget, setAddToGroupTarget] = useState(null);
+  const [focusStudent, setFocusStudent] = useState(null); // conference-mode drawer
   const [savingStudent, setSavingStudent] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg, type = 'success') => setToast({ msg, type, k: Date.now() }), []);
@@ -402,6 +404,7 @@ export default function GradebookPage() {
           getPeriodOrder={getPeriodOrder}
           onHistoryPush={history.push}
           onSaveError={handleSaveError}
+          onStudentFocus={setFocusStudent}
           onEditStudent={setEditStudentTarget}
           onDeleteStudent={setDeleteStudentTarget}
           onAddToGroup={setAddToGroupTarget}
@@ -455,6 +458,17 @@ export default function GradebookPage() {
           refreshScores();
         }}
       />
+
+      {focusStudent && (
+        <StudentFocusPanel
+          student={focusStudent}
+          subject={subject}
+          periods={periods}
+          scores={scores}
+          rosterNo={rosterNumbers.get(String(focusStudent.id))}
+          onClose={() => setFocusStudent(null)}
+        />
+      )}
 
       {toast && (
         <Toast key={toast.k} message={toast.msg} type={toast.type} onDone={() => setToast(null)} />

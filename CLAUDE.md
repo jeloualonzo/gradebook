@@ -185,6 +185,13 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- ROADMAP Phase 3b — rollover + student focus (v1.6.0): the semester
+  rollover wizard (Home right-click → new term in one transaction —
+  structure and attendance config always, roster empty/copied/from-group,
+  dated columns and scores never; PH term sequence defaults) and the
+  conference-mode student-focus drawer (double-click a name: per-period
+  grades, entry chips with P/L/A letters, the missing list — pure model,
+  zero new API; notes and the printable slip deferred by the house rules)
 - ROADMAP Phase 3a — the period-closing cluster (v1.5.0): the active-column
   missing rule (blanks count only where the class has scores) with amber
   name chips; Fill-blanks-with-0 at column and period scope through the

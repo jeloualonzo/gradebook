@@ -284,9 +284,9 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
 | `test-grid-selection.mjs` (42) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (round-trips, Excel quirks, tile/block/clip shapes, token rules) + fill plans (Ctrl+D top-row-repeats, single-cell copy-above, drag-fill tiling) | Fixtures, no I/O |
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
-| `test-class-stats.mjs` (15) | Period-closing semantics: active-column rule ("missing" = blanks where the class has scores), fill-blanks scopes, footer math (median even/odd), failing threshold via cents, rank order with null grades last | Fixtures, no I/O |
+| `test-class-stats.mjs` (25) | Period-closing semantics (active-column rule, fill-blanks scopes, footer math, thresholds, ranking) + term sequencing (rollover defaults) + the student-focus model (P/L/A letters via config, missing list, grade agreement with the calculator) | Fixtures, no I/O |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
-| `test-workflows.mjs` (22) | Group-from-subject, move-column, counts-as-attendance | Live instance (3171) |
+| `test-workflows.mjs` (34) | Group-from-subject, move-column, counts-as-attendance, bulk attendance parity, semester rollover (structure always · roster by choice · dated columns and scores never) | Live instance (3171) |
 | `test-window-state.mjs` (30) | Bounds sanitizing, zoom clamp/persist, full manage() lifecycle | Stub Electron window |
 
 Run the lab: build plain standalone, `mkdir -p /tmp/sync-lab/{a,b,share}`,
@@ -395,6 +395,18 @@ the remote blob SHA against local `git hash-object`.
   and order FREEZE on apply so rows never jump mid-entry — the # column
   always shows canonical roster numbers, and the amber "N of M" chip
   restores. The failing threshold is a view setting, never grade policy.
+- Rollover & focus (3b): Home → right-click a subject → "Start new term
+  from this…" (POST /api/subjects/[id]/rollover — one transaction of
+  ordinary inserts: structure + attendance config always, roster
+  empty/copy/group, dated columns and scores NEVER; exam keeps its one
+  undated auto-column; PH term defaults in src/lib/term.js). Student focus
+  (double-click a name or its context menu) opens a right drawer built by
+  the pure src/lib/studentFocus.js model — per-period grades, entry chips
+  with P/L/A letters mapped through the period's attendance config, and
+  the missing list under the same active-column rule as the chips.
+  Deliberately deferred there: printable slip (print pack), student notes
+  (synced data — needs the schema + snapshot discussion), per-cell history
+  (the app stores none by design).
   Deliberate deviations, documented: Home/End = first/last student in the
   COLUMN, PageUp/Down = horizontal period paging, column select is
   keyboard/context-menu (date headers are editable — editing wins).

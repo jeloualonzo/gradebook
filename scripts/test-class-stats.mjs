@@ -87,5 +87,51 @@ const scores = {
   t('view: ties keep the canonical (alphabetical) order', tied.map(s => s.id).join(',') === 'a,b');
 }
 
+// ---- term sequencing (rollover wizard, Phase 3b) --------------------------------
+{
+  const { nextTerm } = await import('../src/lib/term.js');
+  const a = nextTerm('2026-2027', '1st');
+  t('term: 1st rolls to 2nd, same school year', a.school_year === '2026-2027' && a.semester === '2nd');
+  const b = nextTerm('2026-2027', '2nd');
+  t('term: 2nd rolls to 1st, next school year', b.school_year === '2027-2028' && b.semester === '1st');
+  const c = nextTerm('2026-2027', 'Summer');
+  t('term: Summer rolls to 1st, next school year', c.school_year === '2027-2028' && c.semester === '1st');
+  t('term: unparseable school year passes through unchanged', nextTerm('AY 26', '2nd').school_year === 'AY 26');
+}
+
+// ---- student focus model (Phase 3b) -----------------------------------------------
+{
+  const { buildStudentFocus, attendanceLetter } = await import('../src/lib/studentFocus.js');
+  const subject = { prelim_weight: 100, midterm_weight: 0, final_weight: 0 };
+  const periods = [{
+    id: 'p1', type: 'PRELIM',
+    attendanceConfig: { present_score: 10, late_score: 8, absent_score: 0 },
+    assessments: [
+      { id: 'att', name: 'Attendance', is_exam: 0, weight_percent: 50, columns: [
+        { id: 'a1', date: '2026-07-08', max_score: 10 },
+      ] },
+      { id: 'qz', name: 'Quiz', is_exam: 0, weight_percent: 50, columns: [
+        { id: 'q1', date: '2026-07-09', max_score: 10 },
+        { id: 'q2', date: '2026-07-10', max_score: 10 },
+      ] },
+    ],
+  }];
+  const fScores = { a1: { s1: 8, s2: 10 }, q1: { s1: 6, s2: 9 }, q2: { s2: 7 } }; // s1 missing q2
+  const model = buildStudentFocus({ student: { id: 's1' }, subject, periods, scores: fScores });
+
+  t('focus: attendance letters map through the period config (8 = Late)',
+    model.periods[0].assessments[0].entries[0].letter === 'L');
+  t('focus: letters only on the Attendance assessment',
+    model.periods[0].assessments[1].entries[0].letter === null);
+  t('focus: missing list names the active blank (Quiz, q2)',
+    model.missingCount === 1 && model.missing[0].assessment === 'Quiz' && model.missing[0].date === '2026-07-10');
+  t('focus: entered counts per assessment', model.periods[0].assessments[1].entered === 1);
+  t('focus: period grade matches the calculator (att 80% ×50 + quiz 60% ×50 = 70)',
+    Math.round(model.periods[0].grade) === 70 && Math.round(model.finalGrade) === 70);
+  t('focus: attendanceLetter is cents-safe and null off-scale',
+    attendanceLetter('10', { present_score: 10, late_score: 8, absent_score: 0 }) === 'P' &&
+    attendanceLetter(7, { present_score: 10, late_score: 8, absent_score: 0 }) === null);
+}
+
 console.log(failures === 0 ? '\nALL CLASS STATS TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

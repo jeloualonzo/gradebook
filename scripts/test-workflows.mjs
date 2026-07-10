@@ -150,5 +150,56 @@ const bulkRes2 = await must('POST', '/api/scores/bulk', { entries: [
 ] });
 check('F4: re-pasting the same value applies no new attendance', (bulkRes2.attendance || []).length === 0);
 
+// ============ Feature 5: semester rollover (Phase 3b) ============
+// Structure always · roster by choice · dated columns and scores NEVER.
+const R = await mkSubject('Rollover Src');
+const rs = [];
+for (const [l, f] of [['Reyes', 'Ana'], ['Santos', 'Ben']]) {
+  rs.push((await must('POST', `/api/subjects/${R}/students`, { last_name: l, first_name: f })).id);
+}
+const rPeriods = await must('GET', `/api/subjects/${R}/periods`);
+const rPrelim = rPeriods.find(p => p.type === 'PRELIM');
+const rQuiz = rPrelim.assessments.find(a => a.name === 'Quiz');
+await must('PUT', `/api/assessments/${rQuiz.id}`, { weight_percent: 40 });
+await must('PUT', `/api/attendance/${rPrelim.id}`, { present_score: 12, late_score: 9, absent_score: 1 });
+const rCol = (await must('POST', `/api/assessments/${rQuiz.id}/columns`, { date: '2026-07-15', max_score: 20 })).id;
+await must('PUT', `/api/scores/${rCol}/${rs[0]}`, { value: 15 });
+
+const roll = await must('POST', `/api/subjects/${R}/rollover`, {
+  name: 'Rollover Src', subject_code: 'RS 101', section: 'BSIS 4A',
+  school_year: '2027-2028', semester: '1st', roster: 'copy',
+});
+const newSubj = await must('GET', `/api/subjects/${roll.id}`);
+check('F5: new term carries identity + term fields',
+  newSubj.subject_code === 'RS 101' && newSubj.section === 'BSIS 4A' &&
+  newSubj.school_year === '2027-2028' && newSubj.semester === '1st');
+const nPeriods = await must('GET', `/api/subjects/${roll.id}/periods`);
+const nPrelim = nPeriods.find(p => p.type === 'PRELIM');
+const nQuiz = nPrelim.assessments.find(a => a.name === 'Quiz');
+const nExam = nPrelim.assessments.find(a => a.is_exam);
+check('F5: structure carries — 3 periods, edited weight, attendance config',
+  nPeriods.length === 3 && String(nQuiz.weight_percent) === '40' &&
+  nPrelim.attendanceConfig?.present_score === 12 && nPrelim.attendanceConfig?.late_score === 9);
+check('F5: dated columns do NOT travel; the exam keeps its one undated column',
+  nQuiz.columns.length === 0 && nExam.columns.length === 1 && nExam.columns[0].date === null);
+const nStudents = await must('GET', `/api/subjects/${roll.id}/students`);
+check('F5: roster copied by name with FRESH ids (no scores can follow)',
+  nStudents.length === 2 && nStudents.some(s => s.last_name === 'Reyes') && !nStudents.some(s => rs.includes(s.id)));
+check('F5: scores never travel', Object.keys(await scoresOf(roll.id)).length === 0);
+
+const grp = await must('POST', '/api/groups', { name: 'Rollover Grp' });
+await must('POST', `/api/groups/${grp.id}/students`, { last_name: 'Tan', first_name: 'Cia' });
+const roll2 = await must('POST', `/api/subjects/${R}/rollover`, {
+  name: 'Rollover Grp Term', section: 'X', school_year: '2027-2028', semester: '1st',
+  roster: 'group', group_id: grp.id,
+});
+check('F5: group roster imports the group members',
+  (await must('GET', `/api/subjects/${roll2.id}/students`)).some(s => s.last_name === 'Tan'));
+const roll3 = await must('POST', `/api/subjects/${R}/rollover`, {
+  name: 'Empty Term', section: 'X', school_year: '2027-2028', semester: '2nd', roster: 'empty',
+});
+check('F5: the empty option starts with zero students',
+  (await must('GET', `/api/subjects/${roll3.id}/students`)).length === 0);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL WORKFLOW TESTS PASSED');
 process.exit(failures ? 1 : 0);

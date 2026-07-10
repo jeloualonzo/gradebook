@@ -326,6 +326,15 @@ input[type="number"] {
   color: #334155;
 }
 
+/* Student-focus drawer (Phase 3b): slides in on the house 150ms motion. */
+@keyframes gb-drawer {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+.gb-drawer {
+  animation: gb-drawer 150ms ease-out both;
+}
+
 .period-header {
   background: #1e40af;
   color: white;

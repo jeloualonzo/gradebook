@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import SubjectForm from '@/components/SubjectForm';
+import RolloverDialog from '@/components/RolloverDialog';
 import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import ContextMenu from '@/components/ContextMenu';
@@ -18,6 +19,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [rolloverTarget, setRolloverTarget] = useState(null); // "Start new term from this…"
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   // First-run: this installation has no friendly name yet ("Jelou's laptop").
@@ -191,6 +193,7 @@ export default function HomePage() {
 
   const subjectMenuItems = (s) => [
     { label: 'Open', onClick: () => router.push(`/subjects/${s.id}`) },
+    { label: 'Start new term from this…', onClick: () => setRolloverTarget(s) },
     { label: 'Duplicate', onClick: () => handleDuplicate(s.id) },
     { label: 'Edit…', onClick: () => setEditTarget(s) },
     { label: 'Delete…', danger: true, separatorBefore: true, onClick: () => setDeleteTarget(s) },
@@ -416,6 +419,17 @@ export default function HomePage() {
       />
 
       <ContextMenu menu={menu} onClose={closeMenu} />
+
+      {rolloverTarget && (
+        <RolloverDialog
+          subject={rolloverTarget}
+          onClose={() => setRolloverTarget(null)}
+          onCreated={(newId) => {
+            setRolloverTarget(null);
+            router.push(`/subjects/${newId}`);
+          }}
+        />
+      )}
 
       {toast && (
         <Toast key={toast.key} message={toast.message} type={toast.type} onDone={() => setToast(null)} />

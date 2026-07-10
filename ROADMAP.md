@@ -178,7 +178,7 @@ professional desktop feel over adding features.
 |---|---|---|
 | 1 — Desktop feel | **shipped (v1.1.0)** | Splash ("The Class Record", real stages), session restore, contextual titles, Segoe + tabular numerals (P4 import), staleness sentinel + ambient sync line (P5 import), motion trio |
 | 2 — Excel interaction | **COMPLETE (v1.2.0–v1.4.0)** | 2a selection engine + overlays + range clear + stats · 2b TSV clipboard, paste preview, marching ants, cut-as-move, bulk attendance parity · 2c Ctrl+D fill, drag-fill handle with preview, Ctrl+Arrow edge jumps, drag auto-scroll |
-| 3 — Teacher workflow | **in progress — 3a shipped (v1.5.0)** | Period-closing cluster: missing chips + fill-blanks-with-0 (active-column rule), weights chip, sticky class-stats footer (median in tooltips; pass rate deferred to the policy engine on purpose), frozen non-destructive views (missing / below-75 / rank). Next: student focus, rollover wizard, end-of-semester pack, grade policies |
+| 3 — Teacher workflow | **in progress — 3a (v1.5.0) + 3b (v1.6.0) shipped** | 3a period-closing cluster (missing chips, fill-blanks, weights chip, stats footer, frozen views) · 3b semester rollover wizard (structure always, roster by choice, scores never) + student-focus drawer (conference mode; notes/printable slip deferred by rule). Next: end-of-semester pack, grade policies |
 | 4 — Professional UI | queued | Remainder after P1 imports |
 | 5 — Productivity | queued | Menu bar, tabs, printing, digest |
 | 6 — Analytics | queued | Insights, not dashboards |
