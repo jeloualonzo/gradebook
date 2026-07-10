@@ -284,6 +284,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
 | `test-grid-selection.mjs` (42) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (round-trips, Excel quirks, tile/block/clip shapes, token rules) + fill plans (Ctrl+D top-row-repeats, single-cell copy-above, drag-fill tiling) | Fixtures, no I/O |
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
+| `test-class-stats.mjs` (15) | Period-closing semantics: active-column rule ("missing" = blanks where the class has scores), fill-blanks scopes, footer math (median even/odd), failing threshold via cents, rank order with null grades last | Fixtures, no I/O |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
 | `test-workflows.mjs` (22) | Group-from-subject, move-column, counts-as-attendance | Live instance (3171) |
 | `test-window-state.mjs` (30) | Bounds sanitizing, zoom clamp/persist, full manage() lifecycle | Stub Electron window |
@@ -380,6 +381,20 @@ the remote blob SHA against local `git hash-object`.
   Ctrl+Shift+Arrow extends there; selection and fill drags auto-scroll at
   the container edges (rAF loop re-hit-tests while the pointer holds
   still).
+- Period-closing (3a): "missing" = blanks in ACTIVE columns only (any
+  student has a value — the class took it); amber count chips on student
+  names; "Fill blanks with 0" on a column (cell right-click — all its
+  blanks) and on a period band (active columns only), >5 cells confirms
+  first, always ONE undo entry; a weights chip appears on the period band
+  when assessment weights don't total 100 (renormalization stays, it just
+  stops being invisible); the Stats footer (toggle in the header,
+  device-persisted) pins two sticky-bottom rows — class average per column
+  (High/Low/Median + entered-count in the tooltip) and missing counts;
+  Views are non-destructive lenses (with-missing-work / below-threshold
+  with an inline view-only 75 default / rank by grade) whose membership
+  and order FREEZE on apply so rows never jump mid-entry — the # column
+  always shows canonical roster numbers, and the amber "N of M" chip
+  restores. The failing threshold is a view setting, never grade policy.
   Deliberate deviations, documented: Home/End = first/last student in the
   COLUMN, PageUp/Down = horizontal period paging, column select is
   keyboard/context-menu (date headers are editable — editing wins).

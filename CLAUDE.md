@@ -185,6 +185,14 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- ROADMAP Phase 3a — the period-closing cluster (v1.5.0): the active-column
+  missing rule (blanks count only where the class has scores) with amber
+  name chips; Fill-blanks-with-0 at column and period scope through the
+  bulk pipeline (one undo entry, >5 confirms); the weights≠100 chip; the
+  sticky two-row class-stats footer (avg + missing; High/Low/Median in
+  tooltips; pass rate deliberately deferred until "passing" is policy
+  data); frozen non-destructive views (missing work / below a view-only
+  threshold defaulting 75 / rank by grade, canonical roster numbers kept)
 - ROADMAP Phase 2c — fill, completing Phase 2 (v1.4.0): Ctrl+D fill-down
   (top row repeats; single cell copies above; blanks fill as clears), the
   Excel corner drag-fill handle with dashed extension preview (values

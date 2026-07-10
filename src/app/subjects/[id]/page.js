@@ -1,10 +1,12 @@
 'use client';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useGradebook } from '@/lib/hooks/useGradebook';
 import { useHistory } from '@/lib/hooks/useHistory';
 import { usePageTitle } from '@/lib/hooks/usePageTitle';
+import { computeAllGrades } from '@/lib/gradeCalculator';
+import { missingCounts, belowThreshold, rankOrder } from '@/lib/classStats';
 import GradebookTable from '@/components/GradebookTable';
 import StudentManager from '@/components/StudentManager';
 import StudentForm from '@/components/StudentForm';
@@ -49,6 +51,61 @@ export default function GradebookPage() {
     if (!subject) return;
     try { window.localStorage.setItem('gb-last-subject', String(id)); } catch { /* non-fatal */ }
   }, [id, subject]);
+
+  // --- Views: non-destructive lenses (Phase 3a) -------------------------------
+  // Membership and order FREEZE when a view is applied (Excel doesn't
+  // live-resort either): entering scores never makes rows jump mid-typing,
+  // and filling a blank doesn't pop the student out from under the cursor.
+  // Re-applying the control recomputes. The data never changes.
+  const [viewMode, setViewMode] = useState('all');          // all | missing | below
+  const [viewThreshold, setViewThreshold] = useState(75);   // view lens only — NOT grade policy
+  const [viewSort, setViewSort] = useState('az');           // az | asc | desc
+  const [viewIds, setViewIds] = useState(null);             // frozen id order, null = canonical
+  const [showStats, setShowStats] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('gb-stats-footer') === '1';
+  });
+
+  const applyView = useCallback((mode, threshold, sort) => {
+    setViewMode(mode); setViewThreshold(threshold); setViewSort(sort);
+    if (mode === 'all' && sort === 'az') { setViewIds(null); return; }
+    const grades = computeAllGrades({ subject, periods, scores }, students);
+    const finalById = Object.fromEntries(students.map(s => [s.id, grades[s.id]?.FINAL_GRADE ?? null]));
+    let list = students;
+    if (mode === 'below') list = belowThreshold(students, finalById, threshold);
+    if (mode === 'missing') {
+      const cols = periods.flatMap(p => p.assessments.flatMap(a => a.columns.map(c => ({ columnId: String(c.id) }))));
+      const mc = missingCounts(cols, students.map(s => String(s.id)), scores);
+      list = students.filter(s => (mc.get(String(s.id)) || 0) > 0);
+    }
+    if (sort !== 'az') list = rankOrder(list, finalById, sort);
+    setViewIds(list.map(s => s.id));
+  }, [subject, periods, scores, students]);
+
+  const viewStudents = useMemo(() => {
+    if (!viewIds) return students;
+    const byId = new Map(students.map(s => [s.id, s]));
+    return viewIds.map(vid => byId.get(vid)).filter(Boolean);
+  }, [students, viewIds]);
+
+  // Canonical roster numbers travel with students under any view.
+  const rosterNumbers = useMemo(
+    () => new Map(students.map((s, i) => [String(s.id), i + 1])),
+    [students]
+  );
+
+  const viewActive = viewIds !== null;
+  const sortLabels = { az: 'A–Z', asc: 'Grade ↑', desc: 'Grade ↓' };
+  const cycleSort = () => {
+    const next = viewSort === 'az' ? 'asc' : viewSort === 'asc' ? 'desc' : 'az';
+    applyView(viewMode, viewThreshold, next);
+  };
+  const toggleStats = () => {
+    setShowStats(prev => {
+      try { window.localStorage.setItem('gb-stats-footer', prev ? '0' : '1'); } catch { /* non-fatal */ }
+      return !prev;
+    });
+  };
 
   // Conflicts in context: if sync auto-resolved edits in THIS subject and
   // they haven't been reviewed, a small banner points at them right where
@@ -164,7 +221,59 @@ export default function GradebookPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">{students.length} student{students.length !== 1 ? 's' : ''}</span>
+          {/* Views (Phase 3a): non-destructive lenses — filter/rank freeze on
+              apply; the amber chip + "All students" restore the full roster. */}
+          <div className="flex items-center gap-1">
+            <select
+              value={viewMode}
+              onChange={e => applyView(e.target.value, viewThreshold, viewSort)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              title="View — a lens on the roster; the data never changes"
+            >
+              <option value="all">All students</option>
+              <option value="missing">With missing work</option>
+              <option value="below">Below threshold</option>
+            </select>
+            {viewMode === 'below' && (
+              <input
+                type="number"
+                value={viewThreshold}
+                min="0"
+                max="100"
+                onChange={e => applyView('below', parseFloat(e.target.value) || 0, viewSort)}
+                className="w-14 text-xs border border-gray-200 rounded-lg px-1.5 py-1.5 text-center bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                title="Failing threshold — a view setting only, never a grade policy"
+              />
+            )}
+            <button
+              onClick={cycleSort}
+              className={`px-2 py-1.5 text-xs border rounded-lg ${viewSort !== 'az' ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+              title="Sort the view (order freezes until changed — rows never jump mid-entry)"
+            >
+              {sortLabels[viewSort]}
+            </button>
+            <button
+              onClick={toggleStats}
+              className={`px-2 py-1.5 text-xs border rounded-lg ${showStats ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+              title="Class statistics footer — averages and missing counts per column"
+            >
+              Stats
+            </button>
+          </div>
+          {viewActive ? (
+            <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+              {viewStudents.length} of {students.length}
+              <button
+                onClick={() => applyView('all', viewThreshold, 'az')}
+                className="ml-0.5 text-amber-500 hover:text-amber-800"
+                title="Show all students, alphabetical"
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400">{students.length} student{students.length !== 1 ? 's' : ''}</span>
+          )}
 
           <div className="flex items-center gap-1">
             <button
@@ -276,8 +385,10 @@ export default function GradebookPage() {
         <GradebookTable
           subject={subject}
           periods={periods}
-          students={students}
+          students={viewStudents}
           scores={scores}
+          showStats={showStats}
+          rosterNumbers={rosterNumbers}
           onVisiblePeriodChange={setVisiblePeriod}
           onUpdateScore={updateScore}
           onBulkUpdate={bulkUpdateScores}

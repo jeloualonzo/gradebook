@@ -272,6 +272,60 @@ input[type="number"] {
   z-index: 5;
 }
 
+/* --- Period-closing cluster (Phase 3a) --------------------------------------- */
+/* Missing-work chip on the student name: amber count, whisper volume. */
+.gb-missing-chip {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  height: 15px;
+  line-height: 15px;
+  border-radius: 8px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Class statistics footer: sticks to the viewport bottom while the grid is
+   on screen (paper class records put totals at the bottom too). Label cells
+   are ALSO sticky-left, riding both axes. */
+.gb-stats-foot td {
+  position: sticky;
+  background: #f8fafc;
+  z-index: 9;
+  height: 22px;
+}
+/* Two pinned rows stack: the first sits one row-height above the second. */
+.gb-stats-foot tr:first-child td {
+  bottom: 22px;
+  border-top: 2px solid #cbd5e1;
+}
+.gb-stats-foot tr:last-child td {
+  bottom: 0;
+  border-top: 1px solid #e5e7eb;
+}
+.gb-stats-foot td.sticky-col,
+.gb-stats-foot td.sticky-col-2 {
+  z-index: 12; /* above the body's sticky columns */
+  background: #f8fafc;
+}
+.gb-foot-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.gb-foot-cell {
+  text-align: center;
+  font-size: 10.5px;
+  padding: 3px 2px;
+  color: #334155;
+}
+
 .period-header {
   background: #1e40af;
   color: white;

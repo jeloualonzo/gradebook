@@ -5,7 +5,9 @@ import ScoreCell from './ScoreCell';
 import ContextMenu from './ContextMenu';
 import FindStudentBar from './FindStudentBar';
 import GridSelectionLayer from './GridSelectionLayer';
-import { formatGrade, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
+import ConfirmDialog from './ConfirmDialog';
+import { missingCounts, columnStats, blankEntries } from '@/lib/classStats';
+import { formatGrade, formatNumber, toCents, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -86,6 +88,8 @@ export default function GradebookTable({
   onVisiblePeriodChange,
   onUpdateScore,
   onBulkUpdate,
+  showStats,
+  rosterNumbers,
   onAttendanceApplied,
   onRefreshPeriods,
   onRefreshData,
@@ -345,6 +349,48 @@ export default function GradebookTable({
 
   const wrapRef = useRef(null);
 
+  // --- Period-closing cluster (Phase 3a) -------------------------------------
+  // "Missing" = blanks in ACTIVE columns (the class took it, this student has
+  // nothing) — see src/lib/classStats.js for the rule and its tests.
+  const missingByStudent = useMemo(
+    () => missingCounts(geometry.cols, geometry.rows, scores),
+    [geometry, scores]
+  );
+
+  // Stats footer: per-column class picture + per-period/final class averages.
+  const footerStats = useMemo(() => {
+    if (!showStats || students.length === 0) return null;
+    const ids = geometry.rows;
+    const perColumn = new Map(geometry.cols.map(c => [c.columnId, columnStats(c.columnId, ids, scores)]));
+    const periodAvg = {};
+    let finalSum = 0;
+    let finalN = 0;
+    for (const student of students) {
+      const pg = {};
+      for (const p of periods) pg[p.type] = computePeriodGrade(p.assessments, scores, student.id);
+      for (const p of periods) {
+        if (pg[p.type] !== null) {
+          periodAvg[p.type] = periodAvg[p.type] || { s: 0, n: 0 };
+          periodAvg[p.type].s += pg[p.type];
+          periodAvg[p.type].n += 1;
+        }
+      }
+      const f = computeFinalSubjectGrade(pg, subject);
+      if (f !== null && f !== undefined) { finalSum += f; finalN += 1; }
+    }
+    const avgOf = (t) => (periodAvg[t] ? periodAvg[t].s / periodAvg[t].n : null);
+    return { perColumn, avgOf, finalAvg: finalN ? finalSum / finalN : null };
+  }, [showStats, geometry, scores, periods, students, subject]);
+
+  // Fill-blanks-with-0: >5 cells confirms first (the paste-preview threshold);
+  // smaller fills apply directly — undo covers regret either way.
+  const [fillConfirm, setFillConfirm] = useState(null); // { entries, scope }
+  const requestFillBlanks = useCallback((entries, scope) => {
+    if (entries.length === 0) return;
+    if (entries.length > 5) setFillConfirm({ entries, scope });
+    else handleApplyRange(entries, `fill ${entries.length} blank${entries.length === 1 ? '' : 's'} with 0`);
+  }, [handleApplyRange]);
+
   const handleGridKeyDown = useCallback((e) => {
     if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     const holder = e.target.closest?.('[data-col], [data-max-for]');
@@ -498,19 +544,41 @@ export default function GradebookTable({
             {periods.map(period => {
               const colSpan = period.assessments.reduce((s, a) => s + Math.max(a.columns.length, 1), 0) + 1;
               const colors = PERIOD_COLORS[period.type];
+              // Weights that don't total 100 are silently renormalized in the
+              // grade math (correct for live standing) — this chip just stops
+              // that from being INVISIBLE.
+              const weightSum = period.assessments.reduce((s, a) => s + (parseFloat(a.weight_percent) || 0), 0);
+              const weightsOff = weightSum > 0 && toCents(weightSum) !== 10000;
               return (
                 <th
                   key={period.id}
                   colSpan={colSpan}
                   data-period-head={period.id}
-                  onContextMenu={e => openMenu(e, [
-                    { label: 'Add assessment…', onClick: () => setAddingAssessment(period.id) },
-                  ])}
+                  onContextMenu={e => {
+                    const periodCols = geometry.cols.filter(c => c.periodId === period.id);
+                    const blanks = blankEntries(periodCols, geometry.rows, getScores?.() || scores, { onlyActive: true });
+                    openMenu(e, [
+                      { label: 'Add assessment…', onClick: () => setAddingAssessment(period.id) },
+                      ...(blanks.length > 0 ? [{
+                        label: `Fill blanks with 0 in ${period.type} (${blanks.length})`,
+                        separatorBefore: true,
+                        onClick: () => requestFillBlanks(blanks, period.type),
+                      }] : []),
+                    ]);
+                  }}
                   title="Right-click for actions"
                   className={`${colors.header} text-white text-center py-1.5 px-3 font-semibold tracking-wide text-xs uppercase`}
                 >
                   <div className="flex items-center justify-center gap-2">
                     {period.type}
+                    {weightsOff && (
+                      <span
+                        className="normal-case font-normal text-[10px] text-amber-200"
+                        title={`Assessment weights total ${formatNumber(weightSum)}% — grades renormalize over the categories that have scores`}
+                      >
+                        · weights {formatNumber(weightSum)}%
+                      </span>
+                    )}
                   </div>
                   {addingAssessment === period.id && (
                     <div className="flex items-center gap-1 mt-1 justify-center">
@@ -670,9 +738,13 @@ export default function GradebookTable({
 
             return (
               <tr key={student.id} data-student-row={student.id}>
-                <td className={`${STICKY_NO} bg-white text-center text-gray-400 py-1`}>{idx + 1}</td>
+                {/* Canonical roster number — under a sorted/filtered VIEW the
+                    number travels with the student; renumbering would lie. */}
+                <td className={`${STICKY_NO} bg-white text-center text-gray-400 py-1`}>
+                  {rosterNumbers?.get(String(student.id)) ?? idx + 1}
+                </td>
                 <td
-                  className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800 truncate`}
+                  className={`${STICKY_NAME} bg-white px-3 py-1 font-medium text-gray-800`}
                   onContextMenu={e => openMenu(e, [
                     { label: 'Edit student…', onClick: () => onEditStudent?.(student) },
                     { label: 'Add to Student Group…', onClick: () => onAddToGroup?.(student) },
@@ -680,7 +752,17 @@ export default function GradebookTable({
                   ])}
                   title="Right-click for actions"
                 >
-                  {displayName(student)}
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{displayName(student)}</span>
+                    {(missingByStudent.get(String(student.id)) || 0) > 0 && (
+                      <span
+                        className="gb-missing-chip"
+                        title={`${missingByStudent.get(String(student.id))} missing score${missingByStudent.get(String(student.id)) === 1 ? '' : 's'} — in columns the class has taken`}
+                      >
+                        {missingByStudent.get(String(student.id))}
+                      </span>
+                    )}
+                  </span>
                 </td>
 
                 {periods.map(period => {
@@ -723,6 +805,70 @@ export default function GradebookTable({
             );
           })}
         </tbody>
+        {/* Class statistics footer (Phase 3a): sticky to the viewport bottom
+            while the grid is on screen — where paper class records put their
+            totals row. Two calm rows; High/Low/Median live in the tooltip. */}
+        {footerStats && (
+          <tfoot className="gb-stats-foot">
+            <tr>
+              <td className={`${STICKY_NO} gb-foot-label`} />
+              <td className={`${STICKY_NAME} gb-foot-label px-3 text-right`}>Class average</td>
+              {periods.map(period => (
+                <React.Fragment key={period.id}>
+                  {period.assessments.map(a =>
+                    a.columns.length > 0 ? (
+                      a.columns.map(col => {
+                        const s = footerStats.perColumn.get(String(col.id));
+                        return (
+                          <td
+                            key={col.id}
+                            className="gb-foot-cell"
+                            title={s && s.entered > 0
+                              ? `High ${formatNumber(s.high)} · Low ${formatNumber(s.low)} · Median ${formatNumber(s.median)} · ${s.entered} of ${students.length} entered`
+                              : 'No scores entered yet'}
+                          >
+                            {s && s.avg !== null ? formatNumber(s.avg) : '—'}
+                          </td>
+                        );
+                      })
+                    ) : (
+                      <td key={`${a.id}-foot`} className="gb-foot-cell text-gray-300" />
+                    )
+                  )}
+                  <td className={`gb-foot-cell font-semibold ${PERIOD_COLORS[period.type].text}`}>
+                    {formatGrade(footerStats.avgOf(period.type))}
+                  </td>
+                </React.Fragment>
+              ))}
+              <td className="gb-foot-cell font-bold text-blue-800">{formatGrade(footerStats.finalAvg)}</td>
+            </tr>
+            <tr>
+              <td className={`${STICKY_NO} gb-foot-label`} />
+              <td className={`${STICKY_NAME} gb-foot-label px-3 text-right`}>Missing</td>
+              {periods.map(period => (
+                <React.Fragment key={period.id}>
+                  {period.assessments.map(a =>
+                    a.columns.length > 0 ? (
+                      a.columns.map(col => {
+                        const s = footerStats.perColumn.get(String(col.id));
+                        const m = s ? s.missing : 0;
+                        return (
+                          <td key={col.id} className={`gb-foot-cell ${m > 0 && s.entered > 0 ? 'text-amber-600 font-semibold' : 'text-gray-300'}`}>
+                            {s && s.entered > 0 ? (m > 0 ? m : '·') : ''}
+                          </td>
+                        );
+                      })
+                    ) : (
+                      <td key={`${a.id}-footm`} className="gb-foot-cell" />
+                    )
+                  )}
+                  <td className="gb-foot-cell" />
+                </React.Fragment>
+              ))}
+              <td className="gb-foot-cell" />
+            </tr>
+          </tfoot>
+        )}
       </table>
       <GridSelectionLayer
         gridRef={gridRef}
@@ -734,6 +880,17 @@ export default function GradebookTable({
       />
       </div>
     </div>
+    {fillConfirm && (
+      <ConfirmDialog
+        open
+        danger={false}
+        title="Fill blanks with 0?"
+        message={`${fillConfirm.entries.length} blank cell${fillConfirm.entries.length === 1 ? '' : 's'} in ${fillConfirm.scope} will be set to 0. Columns with no scores at all are left untouched. Ctrl+Z undoes the whole fill.`}
+        confirmLabel="Fill with 0"
+        onConfirm={() => handleApplyRange(fillConfirm.entries, `fill ${fillConfirm.entries.length} blanks with 0`)}
+        onClose={() => setFillConfirm(null)}
+      />
+    )}
     <ContextMenu menu={menu} onClose={closeMenu} />
     {/* Ctrl+F: find a student by any part of their name. */}
     <FindStudentBar students={students} gridRef={gridRef} />

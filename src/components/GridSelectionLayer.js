@@ -614,7 +614,45 @@ export default function GridSelectionLayer({
           },
         },
       ];
-      if (multi) items.push({ label: 'Fill down', separatorBefore: true, onClick: () => fillDown() });
+      // Fill this column's blanks with 0 — the teacher pointed at the column,
+      // so ALL its blanks qualify (the active-column rule applies only to the
+      // wider assessment/period scopes; see classStats.blankEntries).
+      const g = model.geometry();
+      const colId = g.cols[at.c]?.columnId;
+      const scoresNow = getScores?.() || {};
+      let colBlanks = 0;
+      if (colId) {
+        for (const sid of g.rows) {
+          const v = scoresNow?.[colId]?.[sid];
+          if (v === undefined || v === null || v === '') colBlanks += 1;
+        }
+      }
+      if (colId && colBlanks > 0) {
+        items.push({
+          label: `Fill column blanks with 0 (${colBlanks})`,
+          separatorBefore: true,
+          onClick: () => {
+            const entries = [];
+            for (const sid of g.rows) {
+              const v = scoresNow?.[colId]?.[sid];
+              if (v === undefined || v === null || v === '') entries.push({ column_id: colId, student_id: sid, value: 0 });
+            }
+            const label = `fill ${entries.length} blank${entries.length === 1 ? '' : 's'} with 0`;
+            if (entries.length > 5) {
+              setPending({
+                apply: () => onApplyRange?.(entries, label),
+                label,
+                title: 'Fill blanks with 0?',
+                confirmLabel: 'Fill with 0',
+                message: `${entries.length} blank cells in this column will be set to 0. Ctrl+Z undoes the whole fill.`,
+              });
+            } else {
+              onApplyRange?.(entries, label);
+            }
+          },
+        });
+      }
+      if (multi) items.push({ label: 'Fill down', separatorBefore: !colBlanks, onClick: () => fillDown() });
       if (multi) items.push({ label: `Clear ${model.size()} cells`, danger: true, separatorBefore: !multi, onClick: () => clearSelection() });
       items.push({ label: 'Select column', separatorBefore: !multi, onClick: () => model.selectColumn(at.c) });
       items.push({ label: 'Select row', onClick: () => model.selectRow(at.r) });
@@ -643,7 +681,7 @@ export default function GridSelectionLayer({
       grid.removeEventListener('cut', onCut);
       grid.removeEventListener('paste', onPaste);
     };
-  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll]);
+  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll, getScores, onApplyRange]);
 
   return (
     <>
@@ -661,9 +699,9 @@ export default function GridSelectionLayer({
         <ConfirmDialog
           open
           danger={false}
-          title="Paste into the gradebook?"
+          title={pending.title || 'Paste into the gradebook?'}
           message={pending.message}
-          confirmLabel="Paste"
+          confirmLabel={pending.confirmLabel || 'Paste'}
           onConfirm={pending.apply}
           onClose={() => setPending(null)}
         />
