@@ -282,7 +282,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | Suite | What it proves | How |
 |---|---|---|
 | `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
-| `test-grid-selection.mjs` (36) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (serialize/parse round-trips, Excel quirks, tile/block/clip paste shapes, token rules) | Fixtures, no I/O |
+| `test-grid-selection.mjs` (42) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (round-trips, Excel quirks, tile/block/clip shapes, token rules) + fill plans (Ctrl+D top-row-repeats, single-cell copy-above, drag-fill tiling) | Fixtures, no I/O |
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
 | `test-workflows.mjs` (22) | Group-from-subject, move-column, counts-as-attendance | Live instance (3171) |
@@ -372,7 +372,14 @@ the remote blob SHA against local `git hash-object`.
   (source clears in the same undo entry); marching ants mark the source
   (SVG dash animation), retired by paste-of-a-cut, Escape, or any
   structural change. Bulk writes run the attendance-source hook — pasted
-  scores mark Present exactly like typed ones.
+  scores mark Present exactly like typed ones. Fill (2c): Ctrl+D fills the
+  selection's top row down (single cell: copies the cell above; blanks fill
+  as clears); the corner drag-fill handle repeats the selection down or
+  right with a dashed preview (values repeat — sequences are a future
+  step); Ctrl+Arrow jumps the active cell to the grid edge and
+  Ctrl+Shift+Arrow extends there; selection and fill drags auto-scroll at
+  the container edges (rAF loop re-hit-tests while the pointer holds
+  still).
   Deliberate deviations, documented: Home/End = first/last student in the
   COLUMN, PageUp/Down = horizontal period paging, column select is
   keyboard/context-menu (date headers are editable — editing wins).

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { createSelectionModel, computeSelectionStats } from '@/lib/gridSelection';
+import { createSelectionModel, computeSelectionStats, fillDownPlan, fillExtendPlan } from '@/lib/gridSelection';
 import { serializeRange, parseClipboardText, resolvePaste } from '@/lib/tsv';
 import { formatNumber } from '@/lib/gradeCalculator';
 import ConfirmDialog from './ConfirmDialog';
@@ -34,9 +34,14 @@ export default function GridSelectionLayer({
   const [model] = useState(() => createSelectionModel());
 
   const overlayRef = useRef(null);
-  const antsRef = useRef(null);   // marching-ants marquee (clipboard source)
-  const clipRef = useRef(null);   // { rect, cut } — what Ctrl+C/X captured
+  const antsRef = useRef(null);        // marching-ants marquee (clipboard source)
+  const clipRef = useRef(null);        // { rect, cut } — what Ctrl+C/X captured
+  const handleRef = useRef(null);      // the drag-fill handle (selection corner)
+  const fillPreviewRef = useRef(null); // dashed preview while drag-filling
+  const fillDrag = useRef(null);       // { srcRect, ext } during a handle drag
   const dragging = useRef(false);
+  const pointerPos = useRef({ x: 0, y: 0 });
+  const scrollLoop = useRef(null);
   const suppressFocusSync = useRef(false);
   const statsFrame = useRef(null);
   const [stats, setStats] = useState(null);     // multi-cell only; null hides the pill
@@ -84,24 +89,36 @@ export default function GridSelectionLayer({
   // ---- rendering: overlay + stats, driven by model notifications -------------
   const reposition = useCallback(() => {
     const overlay = overlayRef.current;
+    const handle = handleRef.current;
     const wrap = wrapRef.current;
     if (!overlay || !wrap) return;
     const rect = model.rect();
-    if (!rect || !model.isMulti()) {
+    const first = rect && tdFor(rect.r1, rect.c1);
+    const last = rect && tdFor(rect.r2, rect.c2);
+    if (!rect || !first || !last) {
       overlay.style.display = 'none';
+      if (handle) handle.style.display = 'none';
       return;
     }
-    const first = tdFor(rect.r1, rect.c1);
-    const last = tdFor(rect.r2, rect.c2);
-    if (!first || !last) { overlay.style.display = 'none'; return; }
     const w = wrap.getBoundingClientRect();
     const a = first.getBoundingClientRect();
     const b = last.getBoundingClientRect();
-    overlay.style.display = 'block';
-    overlay.style.left = `${a.left - w.left}px`;
-    overlay.style.top = `${a.top - w.top}px`;
-    overlay.style.width = `${b.right - a.left}px`;
-    overlay.style.height = `${b.bottom - a.top}px`;
+    if (model.isMulti()) {
+      overlay.style.display = 'block';
+      overlay.style.left = `${a.left - w.left}px`;
+      overlay.style.top = `${a.top - w.top}px`;
+      overlay.style.width = `${b.right - a.left}px`;
+      overlay.style.height = `${b.bottom - a.top}px`;
+    } else {
+      overlay.style.display = 'none'; // single cell: the focus ring says it
+    }
+    // The drag-fill handle rides the selection's bottom-right corner —
+    // single cells included, exactly like Excel.
+    if (handle) {
+      handle.style.display = 'block';
+      handle.style.left = `${b.right - w.left - 4}px`;
+      handle.style.top = `${b.bottom - w.top - 4}px`;
+    }
   }, [model, tdFor, wrapRef]);
 
   const refreshStats = useCallback(() => {
@@ -270,6 +287,150 @@ export default function GridSelectionLayer({
     }
   }, [model, getScores, onApplyRange, clearClipboardSource]);
 
+  // ---- fill (Phase 2c) --------------------------------------------------------
+  const entriesFromPlan = useCallback((pairs) => {
+    // pairs: [{ srcR, srcC?, c?, dstR, dstC? }] — resolve source values once.
+    const g = model.geometry();
+    const scores = getScores?.() || {};
+    return pairs.map(p => {
+      const srcCol = g.cols[p.srcC ?? p.c];
+      const dstCol = g.cols[p.dstC ?? p.c];
+      const raw = scores?.[srcCol.columnId]?.[g.rows[p.srcR]];
+      const value = raw === undefined || raw === null || raw === '' ? null : parseFloat(raw);
+      return { column_id: dstCol.columnId, student_id: g.rows[p.dstR], value: Number.isNaN(value) ? null : value };
+    });
+  }, [model, getScores]);
+
+  /** Ctrl+D — the top row of the selection fills down (single cell: copy above). */
+  const fillDown = useCallback(() => {
+    const plan = fillDownPlan(model.rect());
+    if (plan.length === 0) return;
+    const entries = entriesFromPlan(plan);
+    onApplyRange?.(entries, `fill ${entries.length} cell${entries.length === 1 ? '' : 's'}`);
+  }, [model, entriesFromPlan, onApplyRange]);
+
+  /** Position the dashed preview rectangle over a prospective fill extension. */
+  const positionFillPreview = useCallback((ext) => {
+    const el = fillPreviewRef.current;
+    const wrap = wrapRef.current;
+    if (!el || !wrap) return;
+    if (!ext) { el.style.display = 'none'; return; }
+    const first = tdFor(ext.r1, ext.c1);
+    const last = tdFor(ext.r2, ext.c2);
+    if (!first || !last) { el.style.display = 'none'; return; }
+    const w = wrap.getBoundingClientRect();
+    const a = first.getBoundingClientRect();
+    const b = last.getBoundingClientRect();
+    el.style.display = 'block';
+    el.style.left = `${a.left - w.left}px`;
+    el.style.top = `${a.top - w.top}px`;
+    el.style.width = `${b.right - a.left}px`;
+    el.style.height = `${b.bottom - a.top}px`;
+  }, [tdFor, wrapRef]);
+
+  /**
+   * Extension geometry for a handle drag: downward or rightward from the
+   * source rectangle, whichever axis the pointer has travelled further on
+   * (v1 fills down/right only — the common gestures; values REPEAT, and
+   * sequence generation stays a documented future step).
+   */
+  const extensionFor = useCallback((src, at) => {
+    if (!src || !at) return null;
+    const dRows = at.r - src.r2;
+    const dCols = at.c - src.c2;
+    if (dRows > 0 && dRows >= dCols) {
+      return { r1: src.r2 + 1, c1: src.c1, r2: at.r, c2: src.c2 };
+    }
+    if (dCols > 0) {
+      return { r1: src.r1, c1: src.c2 + 1, r2: src.r2, c2: at.c };
+    }
+    return null;
+  }, []);
+
+  // ---- drag auto-scroll (shared by selection drags and fill drags) -----------
+  // While a drag holds still at an edge, no pointermove fires — the rAF loop
+  // keeps scrolling AND re-hit-testing at the last known pointer position.
+  const hitTestAtPointer = useCallback(() => {
+    const { x, y } = pointerPos.current;
+    const at = cellCoords(document.elementFromPoint(x, y));
+    if (!at) return;
+    if (fillDrag.current) {
+      const ext = extensionFor(fillDrag.current.srcRect, at);
+      fillDrag.current.ext = ext;
+      positionFillPreview(ext);
+    } else if (dragging.current) {
+      model.extendTo(at.r, at.c);
+    }
+  }, [cellCoords, extensionFor, positionFillPreview, model]);
+
+  const stopAutoScroll = useCallback(() => {
+    if (scrollLoop.current) cancelAnimationFrame(scrollLoop.current);
+    scrollLoop.current = null;
+  }, []);
+
+  const startAutoScroll = useCallback(() => {
+    if (scrollLoop.current) return;
+    const M = 36;        // edge proximity that starts scrolling
+    const SPEED = 24;    // max px per frame, proportional to overshoot
+    const tick = () => {
+      scrollLoop.current = null;
+      if (!dragging.current && !fillDrag.current) return;
+      const grid = gridRef.current;
+      if (grid) {
+        const r = grid.getBoundingClientRect();
+        const { x, y } = pointerPos.current;
+        let dx = 0;
+        if (x < r.left + M) dx = -Math.min(SPEED, r.left + M - x);
+        else if (x > r.right - M) dx = Math.min(SPEED, x - (r.right - M));
+        let dy = 0;
+        const vh = window.innerHeight;
+        if (y < 110) dy = -Math.min(SPEED, 110 - y); // below the sticky header zone
+        else if (y > vh - 48) dy = Math.min(SPEED, y - (vh - 48));
+        if (dx) grid.scrollLeft += dx;
+        if (dy) window.scrollBy(0, dy);
+        if (dx || dy) hitTestAtPointer();
+      }
+      scrollLoop.current = requestAnimationFrame(tick);
+    };
+    scrollLoop.current = requestAnimationFrame(tick);
+  }, [gridRef, hitTestAtPointer]);
+
+  /** Handle drag lifecycle — window listeners so the drag survives leaving the grid. */
+  const beginFillDrag = useCallback((e) => {
+    const src = model.rect();
+    if (!src) return;
+    e.preventDefault();
+    e.stopPropagation();
+    fillDrag.current = { srcRect: src, ext: null };
+    gridRef.current?.classList.add('gb-selecting');
+    pointerPos.current = { x: e.clientX, y: e.clientY };
+    startAutoScroll();
+    const onMove = (ev) => {
+      pointerPos.current = { x: ev.clientX, y: ev.clientY };
+      hitTestAtPointer();
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      gridRef.current?.classList.remove('gb-selecting');
+      stopAutoScroll();
+      const drag = fillDrag.current;
+      fillDrag.current = null;
+      positionFillPreview(null);
+      if (!drag?.ext) return;
+      const entries = entriesFromPlan(fillExtendPlan(drag.srcRect, drag.ext));
+      if (entries.length === 0) return;
+      onApplyRange?.(entries, `fill ${entries.length} cell${entries.length === 1 ? '' : 's'}`);
+      // Excel selects source + fill as one block afterwards.
+      suppressFocusSync.current = true;
+      model.set(drag.srcRect.r1, drag.srcRect.c1);
+      model.extendTo(Math.max(drag.srcRect.r2, drag.ext.r2), Math.max(drag.srcRect.c2, drag.ext.c2));
+      suppressFocusSync.current = false;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [model, gridRef, startAutoScroll, stopAutoScroll, hitTestAtPointer, positionFillPreview, entriesFromPlan, onApplyRange]);
+
   // ---- input wiring on the grid container ------------------------------------
   useEffect(() => {
     const grid = gridRef.current;
@@ -296,6 +457,8 @@ export default function GridSelectionLayer({
         }
         dragging.current = true;
         grid.classList.add('gb-selecting');
+        pointerPos.current = { x: e.clientX, y: e.clientY };
+        startAutoScroll();
         try { grid.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
         return; // focusin sets the anchor
       }
@@ -313,6 +476,7 @@ export default function GridSelectionLayer({
     const onPointerMove = (e) => {
       if (!dragging.current) return;
       e.preventDefault(); // no native text-drag selection mid-drag
+      pointerPos.current = { x: e.clientX, y: e.clientY };
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const at = cellCoords(el);
       if (at) model.extendTo(at.r, at.c);
@@ -322,6 +486,7 @@ export default function GridSelectionLayer({
       if (!dragging.current) return;
       dragging.current = false;
       grid.classList.remove('gb-selecting');
+      stopAutoScroll();
       try { grid.releasePointerCapture(e.pointerId); } catch { /* not held */ }
     };
 
@@ -343,6 +508,40 @@ export default function GridSelectionLayer({
         e.preventDefault();
         e.stopPropagation();
         model.selectAll();
+        return;
+      }
+      if (onScoreCell && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd') {
+        // Ctrl+D — fill down (Excel).
+        e.preventDefault();
+        e.stopPropagation();
+        fillDown();
+        return;
+      }
+      if (onScoreCell && (e.ctrlKey || e.metaKey) && !e.altKey && arrows[e.key]) {
+        // Ctrl+Arrow jumps the ACTIVE cell to the grid edge; with Shift it
+        // extends the selection there instead. (Deliberate deviation from
+        // Excel's data-boundary jumps — edges are what a dense gradebook
+        // needs; see AGENTS.md §12.) The cell's own handler ignores
+        // Ctrl+arrows, so intercepting here shadows nothing.
+        e.preventDefault();
+        e.stopPropagation();
+        const g = model.geometry();
+        const from = model.focus() || cellCoords(e.target);
+        if (!from) return;
+        const [dr, dc] = arrows[e.key];
+        const target = {
+          r: dr === 0 ? from.r : (dr < 0 ? 0 : g.rows.length - 1),
+          c: dc === 0 ? from.c : (dc < 0 ? 0 : g.cols.length - 1),
+        };
+        if (e.shiftKey) {
+          model.extendTo(target.r, target.c);
+        } else {
+          // Move DOM focus like ordinary navigation — focusin syncs the model.
+          const el = grid.querySelector(
+            `tr[data-student-row="${g.rows[target.r]}"] input[data-col="${g.cols[target.c].columnId}"]`
+          );
+          if (el) { el.focus(); el.select?.(); }
+        }
         return;
       }
       if (onScoreCell && e.key === ' ' && !e.altKey) {
@@ -415,7 +614,8 @@ export default function GridSelectionLayer({
           },
         },
       ];
-      if (multi) items.push({ label: `Clear ${model.size()} cells`, danger: true, separatorBefore: true, onClick: () => clearSelection() });
+      if (multi) items.push({ label: 'Fill down', separatorBefore: true, onClick: () => fillDown() });
+      if (multi) items.push({ label: `Clear ${model.size()} cells`, danger: true, separatorBefore: !multi, onClick: () => clearSelection() });
       items.push({ label: 'Select column', separatorBefore: !multi, onClick: () => model.selectColumn(at.c) });
       items.push({ label: 'Select row', onClick: () => model.selectRow(at.r) });
       onOpenMenu(e, items);
@@ -443,11 +643,15 @@ export default function GridSelectionLayer({
       grid.removeEventListener('cut', onCut);
       grid.removeEventListener('paste', onPaste);
     };
-  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource]);
+  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll]);
 
   return (
     <>
       <div ref={overlayRef} className="gb-sel-overlay" aria-hidden="true" />
+      {/* The drag-fill handle: Excel's corner square. Dragging it down or
+          right repeats the selection's values across the extension. */}
+      <div ref={handleRef} className="gb-fill-handle" onPointerDown={beginFillDrag} title="Drag to fill" />
+      <div ref={fillPreviewRef} className="gb-fill-preview" aria-hidden="true" />
       {/* Marching ants — the copied/cut source. An SVG rect with an animated
           dash offset is the one honest way to march a border in CSS. */}
       <svg ref={antsRef} className="gb-ants-overlay" aria-hidden="true">

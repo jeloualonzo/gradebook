@@ -8,7 +8,7 @@
  * The imperative shell (overlays, pointer events) stays deliberately thin;
  * everything decision-shaped lives here where plain Node can test it.
  */
-import { createSelectionModel, normalizeRect, computeSelectionStats } from '../src/lib/gridSelection.js';
+import { createSelectionModel, normalizeRect, computeSelectionStats, fillDownPlan, fillExtendPlan } from '../src/lib/gridSelection.js';
 import { serializeRange, parseClipboardText, normalizeToken, resolvePaste } from '../src/lib/tsv.js';
 
 let failures = 0;
@@ -167,6 +167,27 @@ t('normalize: reversed anchors produce the same rectangle',
   t('paste: junk skips its cell, empty clears its cell',
     messy.skipped === 1 && messy.writes.length === 2 &&
     messy.writes[0].value === 7 && messy.writes[1].value === null);
+}
+
+// ---- fill (Phase 2c) ------------------------------------------------------------
+{
+  const down = fillDownPlan({ r1: 1, c1: 0, r2: 3, c2: 1 });
+  t('fill down: top row repeats into every row below, per column',
+    down.length === 4 && down.every(p => p.srcR === 1) &&
+    down.filter(p => p.c === 0).map(p => p.dstR).join(',') === '2,3');
+  t('fill down: single cell copies the cell above',
+    JSON.stringify(fillDownPlan({ r1: 2, c1: 1, r2: 2, c2: 1 })) === JSON.stringify([{ srcR: 1, dstR: 2, c: 1 }]));
+  t('fill down: first row / single-row selections have nothing to fill',
+    fillDownPlan({ r1: 0, c1: 0, r2: 0, c2: 0 }).length === 0 &&
+    fillDownPlan({ r1: 1, c1: 0, r2: 1, c2: 3 }).length === 0);
+
+  const ext = fillExtendPlan({ r1: 0, c1: 0, r2: 1, c2: 0 }, { r1: 2, c1: 0, r2: 5, c2: 0 });
+  t('drag fill: a 2-row source tiles a 4-row extension (pattern cycles)',
+    ext.map(p => p.srcR).join(',') === '0,1,0,1' && ext.map(p => p.dstR).join(',') === '2,3,4,5');
+  const extR = fillExtendPlan({ r1: 0, c1: 0, r2: 0, c2: 1 }, { r1: 0, c1: 2, r2: 0, c2: 4 });
+  t('drag fill: rightward extension cycles the source columns',
+    extR.map(p => p.srcC).join(',') === '0,1,0' && extR.map(p => p.dstC).join(',') === '2,3,4');
+  t('drag fill: null inputs yield an empty plan', fillExtendPlan(null, null).length === 0);
 }
 
 console.log(failures === 0 ? '\nALL GRID SELECTION TESTS PASSED' : `\n${failures} FAILURES`);

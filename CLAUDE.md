@@ -185,6 +185,12 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- ROADMAP Phase 2c — fill, completing Phase 2 (v1.4.0): Ctrl+D fill-down
+  (top row repeats; single cell copies above; blanks fill as clears), the
+  Excel corner drag-fill handle with dashed extension preview (values
+  repeat down/right; sequences deferred deliberately), Ctrl+Arrow /
+  Ctrl+Shift+Arrow grid-edge jumps, and edge auto-scroll for selection and
+  fill drags (rAF loop that re-hit-tests while the pointer holds still)
 - ROADMAP Phase 2b — the clipboard (v1.3.0): TSV interop with Excel/Sheets/
   LibreOffice/Notepad through native copy/cut/paste events; Excel-true
   placement (divisible → tile, else block-at-anchor clipped at edges);

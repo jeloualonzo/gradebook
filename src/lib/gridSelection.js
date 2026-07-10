@@ -58,6 +58,54 @@ export function computeSelectionStats(geometry, rect, scores) {
   return { cells, values, missing: cells - values, avg: values ? sum / values : null, high, low };
 }
 
+/**
+ * Ctrl+D fill-down plan (Excel semantics): the TOP row of a multi-cell
+ * selection repeats down every row below it, per column — blanks included
+ * (a blank fills down as a clear). A single-cell selection copies the cell
+ * directly above it; on the first row there is nothing above → empty plan.
+ * Returns [{ srcR, dstR, c }] — values resolve through the caller's scores.
+ */
+export function fillDownPlan(rect) {
+  if (!rect) return [];
+  if (rect.r1 === rect.r2 && rect.c1 === rect.c2) {
+    if (rect.r1 === 0) return [];
+    return [{ srcR: rect.r1 - 1, dstR: rect.r1, c: rect.c1 }];
+  }
+  if (rect.r1 === rect.r2) return []; // one row selected — nothing below it to fill
+  const plan = [];
+  for (let c = rect.c1; c <= rect.c2; c++) {
+    for (let r = rect.r1 + 1; r <= rect.r2; r++) {
+      plan.push({ srcR: rect.r1, dstR: r, c });
+    }
+  }
+  return plan;
+}
+
+/**
+ * Drag-fill plan: tile the SOURCE rectangle's values across the extension
+ * rectangle (Excel repeats the source block; sequence generation is a
+ * documented future step, not v1). Works for downward and rightward
+ * extensions — the source pattern cycles via modulo in both axes.
+ * Returns [{ srcR, srcC, dstR, dstC }].
+ */
+export function fillExtendPlan(src, ext) {
+  if (!src || !ext) return [];
+  const sr = src.r2 - src.r1 + 1;
+  const sc = src.c2 - src.c1 + 1;
+  const plan = [];
+  for (let r = ext.r1; r <= ext.r2; r++) {
+    for (let c = ext.c1; c <= ext.c2; c++) {
+      plan.push({
+        srcR: src.r1 + ((((r - src.r1) % sr) + sr) % sr),
+        srcC: src.c1 + ((((c - src.c1) % sc) + sc) % sc),
+        dstR: r,
+        dstC: c,
+      });
+    }
+  }
+  return plan;
+}
+
 export function createSelectionModel() {
   let geometry = { rows: [], cols: [] };
   let geometrySignature = '';

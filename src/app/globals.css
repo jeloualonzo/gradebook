@@ -250,6 +250,28 @@ input[type="number"] {
   to { stroke-dashoffset: -10; }
 }
 
+/* Drag-fill (Phase 2c): Excel's corner handle + the dashed extension preview. */
+.gb-fill-handle {
+  position: absolute;
+  display: none;
+  width: 8px;
+  height: 8px;
+  background: #2563eb;
+  border: 1.5px solid #ffffff;
+  border-radius: 1px;
+  cursor: crosshair;
+  z-index: 8; /* above the sticky panes' shadow line, always grabbable */
+  touch-action: none;
+}
+.gb-fill-preview {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  border: 1.5px dashed #2563eb;
+  background: rgba(37, 99, 235, 0.04);
+  z-index: 5;
+}
+
 .period-header {
   background: #1e40af;
   color: white;
