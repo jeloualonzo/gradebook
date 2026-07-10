@@ -119,5 +119,36 @@ const created = attCols3.find(c => c.date === '2026-07-27');
 check('F3: attendance date auto-created when missing', !!created && created.max_score === 10);
 check('F3: and the scorer marked Present in it', cell(await scoresOf(B), created.id, mariaB.id) === 10);
 
+// ============ Feature 4: bulk writes carry attendance parity (Phase 2b) ============
+// A PASTED score on a counts-as-attendance column must mark Present exactly
+// like a typed one — same hook, same blank-only rule, applications returned
+// so the grid can mirror them live.
+const bulkCol = (await must('POST', `/api/assessments/${quizB.id}/columns`, { date: '2026-08-01', max_score: 10 })).id;
+await must('PUT', `/api/columns/${bulkCol}`, { attendance_source: 1 });
+// Pre-mark Maria LATE for that date — bulk must not overwrite her.
+const attB4 = (await must('GET', `/api/subjects/${B}/periods`)).find(p => p.type === 'PRELIM')
+  .assessments.find(x => x.name === 'Attendance');
+const attCol4 = (await must('POST', `/api/assessments/${attB4.id}/columns`, { date: '2026-08-01', max_score: 10, dedupe_by_date: true })).id;
+await must('PUT', `/api/scores/${attCol4}/${mariaB.id}`, { value: 8 });
+
+const bulkRes = await must('POST', '/api/scores/bulk', { entries: [
+  { column_id: bulkCol, student_id: juanB.id, value: 7 },
+  { column_id: bulkCol, student_id: mariaB.id, value: 6 },
+  { column_id: bulkCol, student_id: pedroB.id, value: null }, // a cleared cell never marks attendance
+] });
+check('F4: bulk response reports the attendance applications',
+  Array.isArray(bulkRes.attendance) && bulkRes.attendance.length === 1 &&
+  bulkRes.attendance[0].applied === true && bulkRes.attendance[0].student_id === juanB.id,
+  JSON.stringify(bulkRes.attendance));
+const after4 = await scoresOf(B);
+check('F4: pasted score auto-marked Juan Present (10)', cell(after4, attCol4, juanB.id) === 10);
+check('F4: existing attendance NOT overwritten (Maria stays 8)', cell(after4, attCol4, mariaB.id) === 8);
+check('F4: cleared cell leaves attendance blank (Pedro)', cell(after4, attCol4, pedroB.id) === undefined);
+// Idempotent re-paste: guards skip identical values; no duplicate marks.
+const bulkRes2 = await must('POST', '/api/scores/bulk', { entries: [
+  { column_id: bulkCol, student_id: juanB.id, value: 7 },
+] });
+check('F4: re-pasting the same value applies no new attendance', (bulkRes2.attendance || []).length === 0);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL WORKFLOW TESTS PASSED');
 process.exit(failures ? 1 : 0);

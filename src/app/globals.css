@@ -230,6 +230,26 @@ input[type="number"] {
   user-select: none;
 }
 
+/* Marching ants: the copied/cut source rectangle (Phase 2b). SVG dashes with
+   an animated offset — the classic Excel marquee, at whisper volume. */
+.gb-ants-overlay {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+.gb-ants-overlay rect {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  animation: gb-ants 600ms linear infinite;
+}
+@keyframes gb-ants {
+  to { stroke-dashoffset: -10; }
+}
+
 .period-header {
   background: #1e40af;
   color: white;

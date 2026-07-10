@@ -185,6 +185,13 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- ROADMAP Phase 2b — the clipboard (v1.3.0): TSV interop with Excel/Sheets/
+  LibreOffice/Notepad through native copy/cut/paste events; Excel-true
+  placement (divisible → tile, else block-at-anchor clipped at edges);
+  empty clears / junk skips; destructive pastes preview first (>5
+  replacements, clips, or skips); cut pastes as a move in ONE undo entry;
+  SVG marching ants mark the source; /api/scores/bulk gained
+  attendance-source parity so pasted scores mark Present like typed ones
 - ROADMAP Phase 2a — the selection engine (v1.2.0): pure grid-selection
   model outside React (`gridSelection.js` + `GridSelectionLayer`), one-
   overlay rendering under the frozen panes, Shift+Arrow/Shift+Click/drag

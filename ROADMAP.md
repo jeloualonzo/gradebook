@@ -177,7 +177,7 @@ professional desktop feel over adding features.
 | Phase | Status | Notes |
 |---|---|---|
 | 1 — Desktop feel | **shipped (v1.1.0)** | Splash ("The Class Record", real stages), session restore, contextual titles, Segoe + tabular numerals (P4 import), staleness sentinel + ambient sync line (P5 import), motion trio |
-| 2 — Excel interaction | **in progress — 2a shipped (v1.2.0)** | Selection engine (pure model + overlay shell), Shift+Arrow/Click/drag, Ctrl+A, row/column select, range clear with bulk undo, selection stats pill. Next: 2b clipboard, 2c fill |
+| 2 — Excel interaction | **in progress — 2a (v1.2.0) + 2b (v1.3.0) shipped** | 2a: selection engine, overlays, range clear, stats. 2b: TSV clipboard (copy/cut/paste with Excel/Sheets), tile/block/clip paste shapes, paste preview, marching ants, cut-as-move, bulk attendance parity. Next: 2c fill (Ctrl+D, drag handle, Ctrl+Arrow edges) |
 | 3 — Teacher workflow | queued | Period-closing cluster first (missing workflow, stats, filters) |
 | 4 — Professional UI | queued | Remainder after P1 imports |
 | 5 — Productivity | queued | Menu bar, tabs, printing, digest |

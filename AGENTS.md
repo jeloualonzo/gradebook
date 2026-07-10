@@ -282,7 +282,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | Suite | What it proves | How |
 |---|---|---|
 | `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
-| `test-grid-selection.mjs` (25) | Pure selection model: anchors/extends/clamps, row/column/all selects, geometry-change collapse, iteration order, stats math | Fixtures, no I/O |
+| `test-grid-selection.mjs` (36) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (serialize/parse round-trips, Excel quirks, tile/block/clip paste shapes, token rules) | Fixtures, no I/O |
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
 | `test-workflows.mjs` (22) | Group-from-subject, move-column, counts-as-attendance | Live instance (3171) |
@@ -362,6 +362,17 @@ the remote blob SHA against local `git hash-object`.
   Ctrl+A all cells, Ctrl+Space column, Shift+Space row, click a # cell for
   its row, Delete clears a range (one undo entry), Esc collapses; a stats
   pill (cells · avg · high · low · missing) shows while a range is active.
+  Clipboard (2b): Ctrl+C/X/V speak TSV with Excel/Sheets/LibreOffice via
+  native copy/cut/paste EVENTS (no permission prompts; single-cell keeps the
+  input's native behavior). Paste placement: selection divisible by the data
+  shape in both dims → tile (covers scalar-fills-selection); else block at
+  the selection's top-left, clipped at grid edges. Empty tokens clear,
+  non-numeric tokens skip their cell; >5 replacements, clipping, or skips
+  raise the paste-preview dialog (Enter confirms). Cut pastes as a MOVE
+  (source clears in the same undo entry); marching ants mark the source
+  (SVG dash animation), retired by paste-of-a-cut, Escape, or any
+  structural change. Bulk writes run the attendance-source hook — pasted
+  scores mark Present exactly like typed ones.
   Deliberate deviations, documented: Home/End = first/last student in the
   COLUMN, PageUp/Down = horizontal period paging, column select is
   keyboard/context-menu (date headers are editable — editing wins).

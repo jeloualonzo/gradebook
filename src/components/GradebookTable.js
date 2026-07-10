@@ -43,7 +43,7 @@ const STICKY_NAME = 'sticky-col-2';
  * the undo/redo closures can re-enter it freely; the v1.0.9 write guards
  * make re-applying identical values a true server-side no-op.
  */
-async function applyBulkWrite({ entries, label, record = true, getScores, onBulkUpdate, onHistoryPush, onSaveError }) {
+async function applyBulkWrite({ entries, label, record = true, getScores, onBulkUpdate, onHistoryPush, onSaveError, onAttendanceApplied }) {
   const scoresNow = getScores?.() || {};
   const before = entries.map(e => {
     const v = scoresNow?.[e.column_id]?.[e.student_id];
@@ -59,8 +59,16 @@ async function applyBulkWrite({ entries, label, record = true, getScores, onBulk
     return false;
   }
   onBulkUpdate?.(entries);
+  // Attendance-source parity: mirror any auto-Present marks live, exactly
+  // like a typed score does (the route returns the applications).
+  try {
+    const json = await res.json();
+    for (const app of json?.attendance || []) {
+      if (app?.applied) onAttendanceApplied?.(app);
+    }
+  } catch { /* body is a convenience — the write itself succeeded */ }
   if (record && onHistoryPush) {
-    const shared = { getScores, onBulkUpdate, onHistoryPush, onSaveError, record: false, label };
+    const shared = { getScores, onBulkUpdate, onHistoryPush, onSaveError, onAttendanceApplied, record: false, label };
     onHistoryPush({
       label,
       undo: () => applyBulkWrite({ ...shared, entries: before }),
@@ -319,18 +327,21 @@ export default function GradebookTable({
     }
   }, []);
 
-  const handleClearRange = useCallback((cells, label) => {
+  // One entry point for every range mutation (clear, paste, fill): commit
+  // the in-flight edit, then run the bulk pipeline.
+  const handleApplyRange = useCallback((entries, label) => {
     withCommittedActiveCell(() => {
       applyBulkWrite({
-        entries: cells.map(c => ({ ...c, value: null })),
+        entries,
         label,
         getScores,
         onBulkUpdate,
         onHistoryPush,
         onSaveError,
+        onAttendanceApplied,
       });
     });
-  }, [withCommittedActiveCell, getScores, onBulkUpdate, onHistoryPush, onSaveError]);
+  }, [withCommittedActiveCell, getScores, onBulkUpdate, onHistoryPush, onSaveError, onAttendanceApplied]);
 
   const wrapRef = useRef(null);
 
@@ -718,7 +729,7 @@ export default function GradebookTable({
         wrapRef={wrapRef}
         geometry={geometry}
         getScores={getScores}
-        onClearRange={handleClearRange}
+        onApplyRange={handleApplyRange}
         onOpenMenu={openMenu}
       />
       </div>

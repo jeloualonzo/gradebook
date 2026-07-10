@@ -454,5 +454,50 @@ await reviewAll();
     (await unrev(A)) === 0 && (await unrev(B)) === 0);
 }
 
+// ---------- S13: bulk range writes are ordinary edits (Phase 2b) ----------
+// A paste/clear is N single edits in one transaction: LWW, conflict logging,
+// and the no-op guards must treat it exactly like typing. Nothing below is
+// special-cased anywhere in the sync layer — that is the assertion.
+{
+  const { id: colP } = await must(A, 'POST', `/api/assessments/${attendanceA.id}/columns`,
+    { date: '2026-07-28', max_score: 10, dedupe_by_date: true });
+  await sync(A); await sync(B); await sync(A); // converge + fresh basis
+
+  // "Paste" three scores on A; B concurrently edits ONE of those cells later.
+  await must(A, 'POST', '/api/scores/bulk', { entries: [
+    { column_id: colP, student_id: st[0], value: 5 },
+    { column_id: colP, student_id: st[1], value: 6 },
+    { column_id: colP, student_id: st[2], value: 7 },
+  ] });
+  await sleep(40);
+  await must(B, 'PUT', `/api/scores/${colP}/${st[1]}`, { value: 9 });
+  await sync(A); await sync(B); await sync(A);
+
+  const sA = await scores(A, subj), sB = await scores(B, subj);
+  check('S13: untouched pasted cells propagate to both laptops',
+    cell(sA, colP, st[0]) === 5 && cell(sB, colP, st[0]) === 5 &&
+    cell(sA, colP, st[2]) === 7 && cell(sB, colP, st[2]) === 7);
+  check('S13: the concurrently edited cell resolves by LWW (9 wins) on both',
+    cell(sA, colP, st[1]) === 9 && cell(sB, colP, st[1]) === 9);
+  const s13List = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  check('S13: exactly the one real conflict logged (6 vs 9), on B only',
+    s13List.length === 1 && s13List[0].kept === '9' && s13List[0].discarded === '6' &&
+    (await must(A, 'GET', '/api/sync')).unreviewed_conflicts === 0,
+    JSON.stringify(s13List.map(c => [c.kept, c.discarded])));
+  await reviewAll();
+
+  // Idempotent re-paste: identical values write NOTHING (v1.0.9 guards) —
+  // the next sync exports a byte-identical state and logs no conflicts.
+  await must(A, 'POST', '/api/scores/bulk', { entries: [
+    { column_id: colP, student_id: st[0], value: 5 },
+    { column_id: colP, student_id: st[1], value: 9 },
+    { column_id: colP, student_id: st[2], value: 7 },
+  ] });
+  const r13 = await sync(A);
+  check('S13: re-pasting identical values is a true no-op (unchanged export)',
+    r13.data?.exported?.unchanged === true);
+  check('S13: and no conflicts anywhere', (await unrev(A)) === 0 && (await unrev(B)) === 0);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

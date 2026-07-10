@@ -9,6 +9,7 @@
  * everything decision-shaped lives here where plain Node can test it.
  */
 import { createSelectionModel, normalizeRect, computeSelectionStats } from '../src/lib/gridSelection.js';
+import { serializeRange, parseClipboardText, normalizeToken, resolvePaste } from '../src/lib/tsv.js';
 
 let failures = 0;
 const t = (name, cond) => {
@@ -104,6 +105,68 @@ t('normalize: reversed anchors produce the same rectangle',
   const single = computeSelectionStats(g, { r1: 0, c1: 0, r2: 0, c2: 0 }, scores);
   t('stats: single filled cell', single.cells === 1 && single.values === 1 && single.missing === 0);
   t('stats: null rect yields null', computeSelectionStats(g, null, scores) === null);
+}
+
+// ---- TSV clipboard (Phase 2b) --------------------------------------------------
+{
+  const g = geo([0, 1, 2], [0, 1]);
+  const scores = { col0: { st0: 8, st1: 10 }, col1: { st0: 7.5 } };
+
+  t('serialize: values, blanks as empty cells, tab/newline framing',
+    serializeRange(g, { r1: 0, c1: 0, r2: 2, c2: 1 }, scores) === '8\t7.5\n10\t\n\t');
+
+  const excel = parseClipboardText('8\t7.5\r\n10\t\r\n');
+  t('parse: CRLF + Excel trailing newline', excel.length === 2 && excel[0][1] === '7.5' && excel[1][1] === '');
+  t('parse: ragged rows are padded', parseClipboardText('1\t2\n3')[1].join(',') === '3,');
+  t('parse: scalar', parseClipboardText('7')[0][0] === '7' && parseClipboardText('7').length === 1);
+  t('parse: empty clipboard is null', parseClipboardText('') === null && parseClipboardText('  ') === null);
+
+  t('token: numbers parse, blanks clear, junk skips',
+    normalizeToken('7.5').value === 7.5 && normalizeToken(' 10 ').value === 10 &&
+    normalizeToken('').clear === true && normalizeToken('abc').skip === true &&
+    normalizeToken('1e5').skip === true);
+
+  // Tiling: selection shape divisible by data shape in BOTH dimensions.
+  const tile = resolvePaste({
+    rowCount: 5, colCount: 5,
+    rect: { r1: 0, c1: 0, r2: 2, c2: 1 }, anchor: { r: 0, c: 0 },
+    data: [['9']],
+  });
+  t('paste: scalar tiles the whole selection', tile.mode === 'tile' && tile.writes.length === 6 && tile.writes.every(w => w.value === 9));
+
+  const rowTile = resolvePaste({
+    rowCount: 5, colCount: 5,
+    rect: { r1: 0, c1: 0, r2: 3, c2: 1 }, anchor: { r: 0, c: 0 },
+    data: [['1', '2']],
+  });
+  t('paste: one row repeats down a divisible selection',
+    rowTile.mode === 'tile' && rowTile.writes.length === 8 &&
+    rowTile.writes.filter(w => w.c === 0).every(w => w.value === 1));
+
+  const block = resolvePaste({
+    rowCount: 5, colCount: 5,
+    rect: { r1: 0, c1: 0, r2: 2, c2: 1 }, anchor: { r: 0, c: 0 },
+    data: [['1', '2'], ['3', '4']], // 2×2 into 3×2 selection: NOT divisible → block
+  });
+  t('paste: non-divisible selection falls back to block-at-anchor',
+    block.mode === 'block' && block.writes.length === 4);
+
+  const clipped = resolvePaste({
+    rowCount: 3, colCount: 2,
+    rect: null, anchor: { r: 2, c: 1 },
+    data: [['1', '2'], ['3', '4']],
+  });
+  t('paste: blocks clip at the grid edges, never wrap',
+    clipped.clipped === true && clipped.writes.length === 1 && clipped.writes[0].value === 1);
+
+  const messy = resolvePaste({
+    rowCount: 5, colCount: 5,
+    rect: null, anchor: { r: 0, c: 0 },
+    data: [['7', 'absent', '']],
+  });
+  t('paste: junk skips its cell, empty clears its cell',
+    messy.skipped === 1 && messy.writes.length === 2 &&
+    messy.writes[0].value === 7 && messy.writes[1].value === null);
 }
 
 console.log(failures === 0 ? '\nALL GRID SELECTION TESTS PASSED' : `\n${failures} FAILURES`);
