@@ -185,6 +185,12 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- ROADMAP Phase 2a — the selection engine (v1.2.0): pure grid-selection
+  model outside React (`gridSelection.js` + `GridSelectionLayer`), one-
+  overlay rendering under the frozen panes, Shift+Arrow/Shift+Click/drag
+  ranges, Ctrl+A / Ctrl+Space / Shift+Space / #-cell row select, range
+  clear as ONE bulk write + ONE undo entry, selection stats pill; ScoreCell
+  untouched (zero new props — the memoization contract held)
 - ROADMAP Phase 1 — professional desktop feel (v1.1.0): "The Class Record"
   splash (embedded artwork, REAL boot stages, splash→app cross-fade via
   deferMaximize/showManaged), session restore (last subject + scroll +

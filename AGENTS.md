@@ -282,6 +282,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | Suite | What it proves | How |
 |---|---|---|
 | `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
+| `test-grid-selection.mjs` (25) | Pure selection model: anchors/extends/clamps, row/column/all selects, geometry-change collapse, iteration order, stats math | Fixtures, no I/O |
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
 | `test-workflows.mjs` (22) | Group-from-subject, move-column, counts-as-attendance | Live instance (3171) |
@@ -306,6 +307,15 @@ the remote blob SHA against local `git hash-object`.
 - **The grid is memoized; keep it that way.** Focus-driven highlights
   (active column, find match) are applied by toggling CSS classes on DOM nodes
   directly — a focus move must never re-render hundreds of `ScoreCell`s.
+- **The selection engine lives OUTSIDE React** (Phase 2, `gridSelection.js`
+  pure model + `GridSelectionLayer` imperative shell). Selection paints as
+  ONE absolutely-positioned overlay (O(1) per change, under the sticky
+  panes); the model follows DOM focus via `focusin`; selection chords run on
+  a capture-phase listener so `ScoreCell` needs ZERO new props. Range
+  mutations funnel through `applyBulkWrite`: commit-active-cell-first, one
+  transactional `/api/scores/bulk` call, one shared-map commit
+  (`bulkUpdateScores`), one undo entry with bulk images both ways.
+  Structural changes collapse the selection — never remap a rectangle.
   Cross-component wiring uses `data-*` contracts:
   `data-cell="score|max"`, `data-col`, `data-col-head`, `data-max-for`,
   `data-student-row`, `data-period-head`, `data-rename-assessment`,
@@ -348,7 +358,13 @@ the remote blob SHA against local `git hash-object`.
   arrows/Enter/Tab/Home/End/PageUp-Down navigation, Ctrl+Home/End corners,
   F2 renames, Delete clears, Esc cancels an edit, drag/double-click column
   resize, Ctrl+F find, Shift+F3 case cycling, checkbox multi-select for bulk
-  actions.
+  actions. Ranges (Phase 2): Shift+Arrow / Shift+Click / drag extend,
+  Ctrl+A all cells, Ctrl+Space column, Shift+Space row, click a # cell for
+  its row, Delete clears a range (one undo entry), Esc collapses; a stats
+  pill (cells · avg · high · low · missing) shows while a range is active.
+  Deliberate deviations, documented: Home/End = first/last student in the
+  COLUMN, PageUp/Down = horizontal period paging, column select is
+  keyboard/context-menu (date headers are editable — editing wins).
 - Quiet chrome: no page subtitles; the status bar hides inside the gradebook;
   hints are tiny gray text, not banners; accent tints are subtle
   (blue = active/hover, amber = attention/conflict, green = kept/success).

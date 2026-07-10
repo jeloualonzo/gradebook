@@ -20,7 +20,7 @@ export default function GradebookPage() {
   const {
     subject, periods, students, scores,
     loading, error,
-    updateScore, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
+    updateScore, bulkUpdateScores, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
     refreshPeriods, refreshStudents, refreshScores, refreshSubject,
   } = useGradebook(id);
 
@@ -280,6 +280,7 @@ export default function GradebookPage() {
           scores={scores}
           onVisiblePeriodChange={setVisiblePeriod}
           onUpdateScore={updateScore}
+          onBulkUpdate={bulkUpdateScores}
           onAttendanceApplied={handleAttendanceApplied}
           onRefreshPeriods={refreshPeriods}
           onRefreshData={refreshData}

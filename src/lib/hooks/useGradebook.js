@@ -56,6 +56,26 @@ export function useGradebook(subjectId) {
     }));
   }, []);
 
+  // One commit for a whole range operation (clear/fill/paste): the shared map
+  // updates once, so the grid reconciles once — never once per cell.
+  const bulkUpdateScores = useCallback((entries) => {
+    if (!entries || entries.length === 0) return;
+    const byCol = new Map();
+    for (const e of entries) {
+      if (!byCol.has(e.column_id)) byCol.set(e.column_id, []);
+      byCol.get(e.column_id).push(e);
+    }
+    setScores(prev => {
+      const next = { ...prev };
+      for (const [colId, list] of byCol) {
+        const col = { ...(next[colId] || {}) };
+        for (const e of list) col[e.student_id] = e.value;
+        next[colId] = col;
+      }
+      return next;
+    });
+  }, []);
+
   // Optimistically patch one assessment's fields in local state.
   // Only the target assessment object changes identity, so memoized header
   // cells for every other assessment skip re-rendering.
@@ -161,7 +181,7 @@ export function useGradebook(subjectId) {
   return {
     subject, periods, students, scores,
     loading, error,
-    updateScore, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
+    updateScore, bulkUpdateScores, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
     refreshPeriods, refreshStudents, refreshScores, refreshSubject,
   };
 }

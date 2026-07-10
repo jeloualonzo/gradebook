@@ -4,6 +4,7 @@ import React from 'react';
 import ScoreCell from './ScoreCell';
 import ContextMenu from './ContextMenu';
 import FindStudentBar from './FindStudentBar';
+import GridSelectionLayer from './GridSelectionLayer';
 import { formatGrade, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
@@ -35,6 +36,40 @@ const PERIOD_COLORS = {
 const STICKY_NO = 'sticky-col';
 const STICKY_NAME = 'sticky-col-2';
 
+/**
+ * One primitive for every range mutation (batch 2a ships clear; fill and
+ * paste will reuse it): ONE transactional bulk write, ONE shared-map commit,
+ * ONE undo entry carrying bulk images in both directions. Module-scope so
+ * the undo/redo closures can re-enter it freely; the v1.0.9 write guards
+ * make re-applying identical values a true server-side no-op.
+ */
+async function applyBulkWrite({ entries, label, record = true, getScores, onBulkUpdate, onHistoryPush, onSaveError }) {
+  const scoresNow = getScores?.() || {};
+  const before = entries.map(e => {
+    const v = scoresNow?.[e.column_id]?.[e.student_id];
+    return { column_id: e.column_id, student_id: e.student_id, value: v === undefined || v === '' ? null : v };
+  });
+  const res = await fetch('/api/scores/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries }),
+  });
+  if (!res.ok) {
+    onSaveError?.('Could not apply the change — nothing was modified.');
+    return false;
+  }
+  onBulkUpdate?.(entries);
+  if (record && onHistoryPush) {
+    const shared = { getScores, onBulkUpdate, onHistoryPush, onSaveError, record: false, label };
+    onHistoryPush({
+      label,
+      undo: () => applyBulkWrite({ ...shared, entries: before }),
+      redo: () => applyBulkWrite({ ...shared, entries }),
+    });
+  }
+  return true;
+}
+
 export default function GradebookTable({
   subject,
   periods,
@@ -42,6 +77,7 @@ export default function GradebookTable({
   scores,
   onVisiblePeriodChange,
   onUpdateScore,
+  onBulkUpdate,
   onAttendanceApplied,
   onRefreshPeriods,
   onRefreshData,
@@ -248,6 +284,56 @@ export default function GradebookTable({
     }
     return m;
   }, [periods]);
+  // --- Selection engine (ROADMAP Phase 2) ------------------------------------
+  // Geometry: the grid as the selection model sees it — visible column order
+  // and roster row order. Rebuilt only on structural change; the model
+  // collapses any active range when the signature shifts.
+  const geometry = useMemo(() => {
+    const cols = [];
+    for (const period of periods) {
+      for (const a of period.assessments) {
+        for (const c of a.columns) {
+          cols.push({ columnId: String(c.id), assessmentId: a.id, periodId: period.id });
+        }
+      }
+    }
+    const rows = students.map(s => String(s.id));
+    return {
+      cols,
+      rows,
+      colIndex: new Map(cols.map((c, i) => [c.columnId, i])),
+      rowIndex: new Map(rows.map((r, i) => [r, i])),
+    };
+  }, [periods, students]);
+
+  // Range operations commit the in-flight cell edit FIRST (through the
+  // existing blur pipeline), so "what the operation saw" always equals what
+  // the shared map says — and the two undo species stay cleanly separated.
+  const withCommittedActiveCell = useCallback((fn) => {
+    const el = typeof document !== 'undefined' ? document.activeElement : null;
+    if (el && gridRef.current?.contains(el) && el.matches?.('input[data-cell="score"]')) {
+      el.blur();
+      requestAnimationFrame(() => fn());
+    } else {
+      fn();
+    }
+  }, []);
+
+  const handleClearRange = useCallback((cells, label) => {
+    withCommittedActiveCell(() => {
+      applyBulkWrite({
+        entries: cells.map(c => ({ ...c, value: null })),
+        label,
+        getScores,
+        onBulkUpdate,
+        onHistoryPush,
+        onSaveError,
+      });
+    });
+  }, [withCommittedActiveCell, getScores, onBulkUpdate, onHistoryPush, onSaveError]);
+
+  const wrapRef = useRef(null);
+
   const handleGridKeyDown = useCallback((e) => {
     if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     const holder = e.target.closest?.('[data-col], [data-max-for]');
@@ -359,6 +445,9 @@ export default function GradebookTable({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
     <div ref={gridRef} className="overflow-x-auto w-full" onScroll={onGridScroll} onFocusCapture={handleGridFocus} onBlurCapture={handleGridBlur} onKeyDown={handleGridKeyDown}>
+      {/* position:relative wrapper — the selection overlay's coordinate space
+          (it scrolls WITH the table, so no scroll listeners are needed). */}
+      <div ref={wrapRef} className="relative w-max">
       <table className="gradebook-table w-max text-xs">
         {/*
           Explicit column widths (table-layout: fixed). Every assessment
@@ -624,6 +713,15 @@ export default function GradebookTable({
           })}
         </tbody>
       </table>
+      <GridSelectionLayer
+        gridRef={gridRef}
+        wrapRef={wrapRef}
+        geometry={geometry}
+        getScores={getScores}
+        onClearRange={handleClearRange}
+        onOpenMenu={openMenu}
+      />
+      </div>
     </div>
     <ContextMenu menu={menu} onClose={closeMenu} />
     {/* Ctrl+F: find a student by any part of their name. */}
