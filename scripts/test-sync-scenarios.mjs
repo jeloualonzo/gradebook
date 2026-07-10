@@ -251,5 +251,60 @@ const afterAll = await must(B, 'GET', '/api/sync/conflicts');
 check('S10: history keeps every entry, all with reviewed_at set',
   afterAll.conflicts.length === 3 && afterAll.conflicts.every(c => !!c.reviewed_at));
 
+// ---------- S11: conflict DETAILS — gradebook-language context ----------
+// The details endpoint must render a conflict the way the gradebook does:
+// subject/period/assessment/student context, a miniature-gradebook
+// comparison for scores, and a field comparison for structural rows.
+
+// Score details (reuse the S10 entry — reviewed entries stay inspectable).
+const allB = await must(B, 'GET', '/api/sync/conflicts');
+const scoreConf = allB.conflicts.find(c => c.table_name === 'scores' && c.discarded === '3');
+const det = await must(B, 'GET', `/api/sync/conflicts/${scoreConf.id}`);
+const ctx1 = Object.fromEntries(det.context.map(x => [x.label, x.value]));
+check('S11: score details carry full gradebook context',
+  ctx1['Subject'] === 'Networking' && ctx1['Grading Period'] === 'PRELIM' &&
+  ctx1['Assessment'] === 'Quiz' && /Tres, Gamma/.test(ctx1['Student'] || ''),
+  JSON.stringify(ctx1));
+check('S11: mini-gradebook marks the conflicted row among roster neighbors',
+  det.comparison?.type === 'score-grid' &&
+  det.comparison.students.length >= 2 &&
+  det.comparison.students.some(s => s.conflicted && /Tres, Gamma/.test(s.name)) &&
+  det.comparison.students.some(s => !s.conflicted));
+const tgt = det.comparison.students.find(s => s.conflicted);
+check('S11: previous and CURRENT (live) values shown', tgt.before === '3' && tgt.after === '3');
+check('S11: superseded flag set (the restore changed the cell after the decision)',
+  det.comparison.superseded === true);
+
+// Column conflict: max score edited on both laptops → fields comparison.
+await must(A, 'PUT', `/api/columns/${cols[2]}`, { max_score: 15 });
+await sleep(30);
+await must(B, 'PUT', `/api/columns/${cols[2]}`, { max_score: 20 }); // later → wins
+await sync(A); await sync(B); await sync(A);
+const listB3 = await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1');
+const colConf = listB3.conflicts.find(c => c.table_name === 'assessment_columns');
+check('S11: column conflict logged with a contextual label',
+  !!colConf && /Quiz/.test(colConf.label) && /Networking/.test(colConf.label), colConf?.label);
+const det2 = await must(B, 'GET', `/api/sync/conflicts/${colConf.id}`);
+const ctx2 = Object.fromEntries(det2.context.map(x => [x.label, x.value]));
+check('S11: column details name subject, period, assessment',
+  ctx2['Subject'] === 'Networking' && ctx2['Grading Period'] === 'PRELIM' && ctx2['Assessment'] === 'Quiz');
+const maxField = det2.comparison?.fields?.find(f => f.key === 'max_score');
+check('S11: field comparison flags exactly the max-score change',
+  det2.comparison?.type === 'fields' && maxField?.before === '15' && maxField?.after === '20' && maxField?.changed === true &&
+  det2.comparison.fields.find(f => f.key === 'date')?.changed === false);
+
+// Restore through the same flow the confirm dialog uses.
+check('S11: restore of the column conflict succeeds',
+  (await must(B, 'POST', '/api/sync/conflicts/restore', { id: colConf.id })).ok === true);
+const quizColB = (await must(B, 'GET', `/api/subjects/${subj}/periods`))[0]
+  .assessments.find(a => a.name === 'Quiz').columns.find(c => c.id === cols[2]);
+check('S11: max score restored on B', String(quizColB.max_score) === '15', `got ${quizColB.max_score}`);
+await sync(B); await sync(A);
+const quizColA = (await must(A, 'GET', `/api/subjects/${subj}/periods`))[0]
+  .assessments.find(a => a.name === 'Quiz').columns.find(c => c.id === cols[2]);
+check('S11: restored max propagates to A with no new conflicts',
+  String(quizColA.max_score) === '15' && (await must(A, 'GET', '/api/sync')).unreviewed_conflicts === 0);
+check('S11: unknown conflict id → 404', (await j(B, 'GET', '/api/sync/conflicts/nope')).status === 404);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

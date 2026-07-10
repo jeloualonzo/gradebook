@@ -3,6 +3,8 @@ import path from 'path';
 import zlib from 'zlib';
 import crypto from 'crypto';
 import db from '@/lib/db';
+import { displayName } from '@/lib/names';
+import { formatNumber } from '@/lib/gradeCalculator';
 import {
   SYNCED_TABLES,
   FORMAT_VERSION,
@@ -329,34 +331,99 @@ export function runSync({ force = false } = {}) {
   return { ok: true, exported, imported, synced_at: db.now() };
 }
 
-/** Human-readable description of one synced row, best-effort via lookups. */
+/**
+ * Human-readable description of one synced row, best-effort via lookups —
+ * every label carries enough context (subject, period, assessment) that a
+ * conflict entry is recognizable days later without opening details.
+ */
 function describeRow(tableName, row) {
   const get = (sql, params) => { try { return db.get(sql, params); } catch { return null; } };
+  const periodSubject = (periodId) => get(
+    `SELECT p.type AS period, s.name AS subject FROM grading_periods p JOIN subjects s ON s.id = p.subject_id WHERE p.id = ?`,
+    [periodId]
+  );
   switch (tableName) {
     case 'scores': {
       const student = get('SELECT last_name, first_name FROM students WHERE id = ?', [row.student_id]);
       const ctx = get(
-        `SELECT ac.date, a.name AS assessment, s.name AS subject
+        `SELECT ac.date, a.name AS assessment, a.is_exam, p.type AS period, s.name AS subject
            FROM assessment_columns ac
            JOIN assessments a ON a.id = ac.assessment_id
            JOIN grading_periods p ON p.id = a.period_id
            JOIN subjects s ON s.id = p.subject_id
           WHERE ac.id = ?`, [row.column_id]);
       const who = student ? `${student.last_name}, ${student.first_name}` : 'a student';
-      const where = ctx ? `${ctx.assessment}${ctx.date ? ' ' + ctx.date : ''} — ${ctx.subject}` : 'an assessment';
-      return { label: `Score of ${who} (${where})`, value: row.deleted_at ? 'cleared' : String(row.value) };
+      const where = ctx
+        ? `${ctx.is_exam ? 'Exam' : ctx.assessment}${ctx.date ? ' ' + ctx.date : ''} · ${ctx.period} — ${ctx.subject}`
+        : 'an assessment';
+      return { label: `Score of ${who} (${where})`, value: row.deleted_at || row.value === null || row.value === undefined ? 'cleared' : String(formatNumber(row.value)) };
     }
-    case 'students':
-      return { label: 'Student details', value: `${row.last_name}, ${row.first_name}${row.middle_name ? ' ' + row.middle_name : ''}${row.deleted_at ? ' (deleted)' : ''}` };
+    case 'students': {
+      const subj = get('SELECT name FROM subjects WHERE id = ?', [row.subject_id]);
+      return {
+        label: `Student — ${subj ? subj.name : 'a subject'}`,
+        value: `${row.last_name}, ${row.first_name}${row.middle_name ? ' ' + row.middle_name : ''}${row.suffix ? ' ' + row.suffix : ''}${row.deleted_at ? ' (deleted)' : ''}`,
+      };
+    }
     case 'subjects':
-      return { label: `Subject settings — ${row.name}`, value: `${row.name} · ${row.section} · weights ${row.prelim_weight}/${row.midterm_weight}/${row.final_weight}${row.deleted_at ? ' (deleted)' : ''}` };
-    case 'assessments':
-      return { label: 'Assessment', value: `${row.name}${row.weight_percent ? ` (${row.weight_percent}%)` : ''}${row.deleted_at ? ' (deleted)' : ''}` };
-    case 'assessment_columns':
-      return { label: 'Assessment column', value: `${row.date || 'no date'} · max ${row.max_score}${row.deleted_at ? ' (deleted)' : ''}` };
+      return { label: `Subject settings — ${row.name}`, value: `${row.name} · ${row.section} · weights ${formatNumber(row.prelim_weight)}/${formatNumber(row.midterm_weight)}/${formatNumber(row.final_weight)}${row.deleted_at ? ' (deleted)' : ''}` };
+    case 'assessments': {
+      const ctx = periodSubject(row.period_id);
+      return {
+        label: `Assessment${ctx ? ` (${ctx.period} — ${ctx.subject})` : ''}`,
+        value: `${row.name}${row.weight_percent ? ` (${formatNumber(row.weight_percent)}%)` : ''}${row.deleted_at ? ' (deleted)' : ''}`,
+      };
+    }
+    case 'assessment_columns': {
+      const ctx = get(
+        `SELECT a.name AS assessment, a.is_exam, p.type AS period, s.name AS subject
+           FROM assessments a JOIN grading_periods p ON p.id = a.period_id JOIN subjects s ON s.id = p.subject_id
+          WHERE a.id = ?`, [row.assessment_id]);
+      return {
+        label: ctx ? `${ctx.is_exam ? 'Exam' : ctx.assessment} date column (${ctx.period} — ${ctx.subject})` : 'Assessment column',
+        value: `${row.date || 'no date'} · max ${formatNumber(row.max_score)}${row.attendance_source ? ' · counts as attendance' : ''}${row.deleted_at ? ' (deleted)' : ''}`,
+      };
+    }
+    case 'attendance_config': {
+      const ctx = periodSubject(row.period_id);
+      return {
+        label: `Attendance scoring${ctx ? ` (${ctx.period} — ${ctx.subject})` : ''}`,
+        value: `Present ${formatNumber(row.present_score)} · Late ${formatNumber(row.late_score)} · Absent ${formatNumber(row.absent_score)}`,
+      };
+    }
+    case 'grading_periods': {
+      const subj = get('SELECT name FROM subjects WHERE id = ?', [row.subject_id]);
+      return { label: `Grading period — ${subj ? subj.name : 'a subject'}`, value: `${row.type}${row.deleted_at ? ' (deleted)' : ''}` };
+    }
+    case 'student_groups':
+      return { label: 'Student group', value: `${row.name}${row.deleted_at ? ' (deleted)' : ''}` };
+    case 'group_students': {
+      const grp = get('SELECT name FROM student_groups WHERE id = ?', [row.group_id]);
+      return {
+        label: `Group member — ${grp ? grp.name : 'a group'}`,
+        value: `${row.last_name}, ${row.first_name}${row.middle_name ? ' ' + row.middle_name : ''}${row.suffix ? ' ' + row.suffix : ''}${row.deleted_at ? ' (deleted)' : ''}`,
+      };
+    }
     default:
       return { label: tableName.replace(/_/g, ' '), value: row.deleted_at ? 'deleted' : 'edited' };
   }
+}
+
+/** Shared winner/loser attribution shape for the list and the details view. */
+function conflictAttribution(r, config, winnerRow, loserRow) {
+  const peerLabel = (id) => config.peers?.[id]?.label || 'the other laptop';
+  const ownLabel = config.device_label || 'this laptop';
+  const kept = describeRow(r.table_name, winnerRow);
+  const discarded = describeRow(r.table_name, loserRow);
+  return {
+    label: kept.label,
+    kept: kept.value,
+    kept_from: r.winner === 'peer' ? peerLabel(r.peer_device_id) : ownLabel,
+    kept_at: r.winner_updated_at,
+    discarded: discarded.value,
+    discarded_from: r.winner === 'peer' ? ownLabel : peerLabel(r.peer_device_id),
+    discarded_at: r.loser_updated_at,
+  };
 }
 
 /** The subject a conflict belongs to (best-effort, for contextual banners). */
@@ -413,8 +480,6 @@ function locateCurrentRow(table, winnerRow) {
  */
 export function listConflicts(limit = 100) {
   const config = db.getDeviceConfig();
-  const peerLabel = (id) => config.peers?.[id]?.label || 'the other laptop';
-  const ownLabel = config.device_label || 'this laptop';
   const rows = db.all(
     'SELECT * FROM sync_conflicts ORDER BY resolved_at DESC, id DESC LIMIT ?',
     [Math.max(1, Math.min(200, limit))]
@@ -424,24 +489,239 @@ export function listConflicts(limit = 100) {
     try { winnerRow = JSON.parse(r.winner_row); } catch { /* keep {} */ }
     try { loserRow = JSON.parse(r.loser_row); } catch { /* keep {} */ }
     const table = SYNCED_TABLES.find(t => t.name === r.table_name) || null;
-    const kept = describeRow(r.table_name, winnerRow);
-    const discarded = describeRow(r.table_name, loserRow);
     return {
       id: r.id,
       table_name: r.table_name,
       resolved_at: r.resolved_at,
       reviewed_at: r.reviewed_at || null,
       subject_id: conflictSubjectId(r.table_name, winnerRow) || conflictSubjectId(r.table_name, loserRow),
-      label: kept.label,
-      kept: kept.value,
-      kept_from: r.winner === 'peer' ? peerLabel(r.peer_device_id) : ownLabel,
-      kept_at: r.winner_updated_at,
-      discarded: discarded.value,
-      discarded_from: r.winner === 'peer' ? ownLabel : peerLabel(r.peer_device_id),
-      discarded_at: r.loser_updated_at,
+      ...conflictAttribution(r, config, winnerRow, loserRow),
       restorable: !!(table && locateCurrentRow(table, winnerRow)),
     };
   });
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+/** 'YYYY-MM-DD' → 'July 8, 2026' (parsed manually — no timezone surprises). */
+function longDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return iso ? String(iso) : 'no date';
+  return `${MONTH_NAMES[+m[2] - 1]} ${+m[3]}, ${+m[1]}`;
+}
+
+/**
+ * Everything the details view needs to judge a conflict in GRADEBOOK
+ * language: context rows (subject, period, assessment, date, student …)
+ * plus an entity-appropriate comparison —
+ *   scores            → a miniature gradebook (neighboring students, the
+ *                       conflicted cell flagged; Previous vs Current)
+ *   everything else   → a field-by-field Previous/Current table
+ * "Current" always reflects the database NOW; `superseded` says the row
+ * has been edited again since the merge decided this conflict.
+ */
+export function conflictDetails(conflictId) {
+  const r = db.get('SELECT * FROM sync_conflicts WHERE id = ?', [conflictId]);
+  if (!r) return null;
+  const config = db.getDeviceConfig();
+  const table = SYNCED_TABLES.find(t => t.name === r.table_name) || null;
+  let winnerRow = {}, loserRow = {};
+  try { winnerRow = JSON.parse(r.winner_row); } catch { /* keep {} */ }
+  try { loserRow = JSON.parse(r.loser_row); } catch { /* keep {} */ }
+  const current = table ? locateCurrentRow(table, winnerRow) : null;
+  const get = (sql, params) => { try { return db.get(sql, params); } catch { return null; } };
+
+  const context = [];
+  const push = (label, value) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') context.push({ label, value: String(value) });
+  };
+  const yn = (v) => (v ? 'Yes' : 'No');
+  const codeName = (m) => m && `${m.subject_code ? m.subject_code + ' — ' : ''}${m.subject || m.name}`;
+
+  // Field-by-field comparison. Previous = the discarded version; Current =
+  // the row as it stands NOW (kept version if the row vanished).
+  const fieldComparison = (defs) => {
+    const after = current || winnerRow;
+    const str = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));
+    const fields = defs.map(([key, label, fmt]) => {
+      const f = fmt || ((v) => v);
+      const before = str(f(loserRow[key]));
+      const now = str(f(after[key]));
+      return { key, label, before, after: now, changed: before !== now };
+    });
+    fields.push({
+      key: 'status',
+      label: 'Status',
+      before: loserRow.deleted_at ? 'Deleted' : 'Active',
+      after: after.deleted_at ? 'Deleted' : 'Active',
+      changed: !!loserRow.deleted_at !== !!after.deleted_at,
+    });
+    return {
+      type: 'fields',
+      fields,
+      superseded: !!(current && table && !rowsEqual(current, winnerRow, table.columns.filter(c => c !== 'updated_at'))),
+    };
+  };
+
+  let comparison = null;
+  switch (r.table_name) {
+    case 'scores': {
+      const meta = get(
+        `SELECT ac.date, ac.max_score, ac.attendance_source, a.name AS assessment, a.is_exam,
+                p.type AS period, s.id AS subject_id, s.name AS subject, s.subject_code, s.section, s.school_year
+           FROM assessment_columns ac
+           JOIN assessments a ON a.id = ac.assessment_id
+           JOIN grading_periods p ON p.id = a.period_id
+           JOIN subjects s ON s.id = p.subject_id
+          WHERE ac.id = ?`, [winnerRow.column_id]);
+      const student = get('SELECT * FROM students WHERE id = ?', [winnerRow.student_id]);
+      push('Subject', codeName(meta));
+      push('Section', meta?.section);
+      push('School Year', meta?.school_year);
+      push('Grading Period', meta?.period);
+      push('Assessment', meta && (meta.is_exam ? 'Exam' : meta.assessment));
+      push('Date', meta && longDate(meta.date));
+      push('Max Score', meta && formatNumber(meta.max_score));
+      push('Counts as Attendance', meta && yn(meta.attendance_source));
+      push('Student', student && displayName(student));
+
+      const scoreVal = (row) => (!row || row.deleted_at || row.value === null || row.value === undefined ? '—' : String(formatNumber(row.value)));
+      if (meta && student) {
+        // Miniature gradebook: the student plus up to two roster neighbors on
+        // each side, in the exact order the real grid uses. Neighbor values
+        // are the LIVE ones — pure recognition context.
+        const roster = db.all(
+          `SELECT * FROM students WHERE subject_id = ? AND deleted_at IS NULL
+            ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE, middle_name COLLATE NOCASE`,
+          [meta.subject_id]
+        );
+        const idx = roster.findIndex(s => s.id === student.id);
+        const windowRows = idx === -1 ? [student] : roster.slice(Math.max(0, idx - 2), idx + 3);
+        const live = new Map(
+          db.all('SELECT student_id, value, deleted_at FROM scores WHERE column_id = ?', [winnerRow.column_id]).map(x => [x.student_id, x])
+        );
+        comparison = {
+          type: 'score-grid',
+          header: `${meta.is_exam ? 'Exam' : meta.assessment}${meta.date ? ' · ' + longDate(meta.date) : ''} · max ${formatNumber(meta.max_score)}`,
+          students: windowRows.map(s => {
+            const conflicted = s.id === student.id;
+            const now = scoreVal(live.get(s.id));
+            return { name: displayName(s), conflicted, before: conflicted ? scoreVal(loserRow) : now, after: now };
+          }),
+          superseded: scoreVal(live.get(student.id)) !== scoreVal(winnerRow),
+        };
+      } else {
+        comparison = {
+          type: 'fields',
+          fields: [{ key: 'value', label: 'Score', before: scoreVal(loserRow), after: scoreVal(current || winnerRow), changed: scoreVal(loserRow) !== scoreVal(current || winnerRow) }],
+          superseded: false,
+        };
+      }
+      break;
+    }
+    case 'assessment_columns': {
+      const meta = get(
+        `SELECT a.name AS assessment, a.is_exam, p.type AS period, s.name AS subject, s.subject_code, s.section, s.school_year
+           FROM assessments a JOIN grading_periods p ON p.id = a.period_id JOIN subjects s ON s.id = p.subject_id
+          WHERE a.id = ?`, [winnerRow.assessment_id]);
+      push('Subject', codeName(meta));
+      push('Section', meta?.section);
+      push('School Year', meta?.school_year);
+      push('Grading Period', meta?.period);
+      push('Assessment', meta && (meta.is_exam ? 'Exam' : meta.assessment));
+      comparison = fieldComparison([
+        ['date', 'Date', longDate],
+        ['max_score', 'Max Score', formatNumber],
+        ['attendance_source', 'Counts as Attendance', yn],
+      ]);
+      break;
+    }
+    case 'assessments': {
+      const meta = get(
+        `SELECT p.type AS period, s.name AS subject, s.subject_code, s.section
+           FROM grading_periods p JOIN subjects s ON s.id = p.subject_id WHERE p.id = ?`, [winnerRow.period_id]);
+      push('Subject', codeName(meta));
+      push('Section', meta?.section);
+      push('Grading Period', meta?.period);
+      comparison = fieldComparison([
+        ['name', 'Assessment Name'],
+        ['weight_percent', 'Weight %', formatNumber],
+      ]);
+      break;
+    }
+    case 'students': {
+      const meta = get('SELECT name AS subject, subject_code, section FROM subjects WHERE id = ?', [winnerRow.subject_id]);
+      push('Subject', codeName(meta));
+      push('Section', meta?.section);
+      comparison = fieldComparison([
+        ['last_name', 'Last Name'],
+        ['first_name', 'First Name'],
+        ['middle_name', 'Middle Name'],
+        ['suffix', 'Suffix'],
+      ]);
+      break;
+    }
+    case 'group_students': {
+      const meta = get('SELECT name FROM student_groups WHERE id = ?', [winnerRow.group_id]);
+      push('Student Group', meta?.name);
+      comparison = fieldComparison([
+        ['last_name', 'Last Name'],
+        ['first_name', 'First Name'],
+        ['middle_name', 'Middle Name'],
+        ['suffix', 'Suffix'],
+      ]);
+      break;
+    }
+    case 'student_groups':
+      comparison = fieldComparison([
+        ['name', 'Group Name'],
+        ['description', 'Description'],
+      ]);
+      break;
+    case 'subjects':
+      comparison = fieldComparison([
+        ['name', 'Subject Title'],
+        ['subject_code', 'Subject Code'],
+        ['section', 'Section'],
+        ['semester', 'Semester'],
+        ['school_year', 'School Year'],
+        ['prelim_weight', 'Prelim Weight %', formatNumber],
+        ['midterm_weight', 'Midterm Weight %', formatNumber],
+        ['final_weight', 'Final Weight %', formatNumber],
+      ]);
+      break;
+    case 'attendance_config': {
+      const meta = get(
+        `SELECT p.type AS period, s.name AS subject FROM grading_periods p JOIN subjects s ON s.id = p.subject_id WHERE p.id = ?`,
+        [winnerRow.period_id]);
+      push('Subject', meta?.subject);
+      push('Grading Period', meta?.period);
+      comparison = fieldComparison([
+        ['present_score', 'Present Score', formatNumber],
+        ['late_score', 'Late Score', formatNumber],
+        ['absent_score', 'Absent Score', formatNumber],
+      ]);
+      break;
+    }
+    case 'grading_periods': {
+      const subj = get('SELECT name FROM subjects WHERE id = ?', [winnerRow.subject_id]);
+      push('Subject', subj?.name);
+      comparison = fieldComparison([['type', 'Period']]);
+      break;
+    }
+    default:
+      comparison = null;
+  }
+
+  return {
+    id: r.id,
+    table_name: r.table_name,
+    resolved_at: r.resolved_at,
+    reviewed_at: r.reviewed_at || null,
+    restorable: !!(table && current),
+    ...conflictAttribution(r, config, winnerRow, loserRow),
+    context,
+    comparison,
+  };
 }
 
 /** Number of conflicts awaiting review (drives the badge + toast). */
