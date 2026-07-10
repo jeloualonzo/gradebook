@@ -3,7 +3,9 @@
 **Audience:** AI agents and engineers continuing development of this project.
 This is the technical handbook: how the system works, how to change it safely, and
 what must never be broken. For project philosophy and user preferences read
-`CLAUDE.md`; for a narrative orientation read `PROJECT_HANDOVER.md`.
+`CLAUDE.md`; for a narrative orientation read `PROJECT_HANDOVER.md`; for the
+product vision and phase plan read `ROADMAP.md` — **consult it before proposing
+or implementing any improvement.**
 
 **The product:** Faculty Gradebook — an offline-first Windows desktop app for two
 instructors who share subjects and grade on two laptops, synchronized through a
