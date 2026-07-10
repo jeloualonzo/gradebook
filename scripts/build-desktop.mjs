@@ -18,6 +18,7 @@
 import { spawnSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
+import https from 'https';
 import path from 'path';
 
 const root = process.cwd();
@@ -262,6 +263,67 @@ const builderArgs = process.argv.includes('--dir')
 run(node, [path.join(root, 'node_modules', 'electron-builder', 'cli.js'), ...builderArgs]);
 
 /**
+ * Upload ONE release asset by streaming it over node:https.
+ *
+ * WHY NOT fetch(): Node's built-in fetch (undici) enforces a fixed 300s
+ * deadline for receiving RESPONSE HEADERS (undici's `headersTimeout`), and
+ * Node exposes no way to raise it — no fetch option, no CLI flag, no env
+ * var — short of shipping the undici npm package as a new dependency. For
+ * a release-asset upload, GitHub sends its response only AFTER the entire
+ * body has been received and finalized, so that deadline silently caps
+ * every upload at 5 minutes. The v1.0.8 publish died exactly this way: the
+ * 113 MB installer uploaded COMPLETELY (the asset was live on the release),
+ * the 201 just arrived later than undici was willing to wait — and the
+ * release was left half-published, without its blockmap and latest.yml.
+ * Streaming the request body through fetch (duplex: 'half') would not help
+ * either: the deadline is on the response side.
+ *
+ * Timeout model — the SHAPE matters more than the numbers:
+ * - While the body is flowing: an INACTIVITY timeout. socket.setTimeout
+ *   resets on every read/write, so a slow but progressing upload may take
+ *   as long as it needs; only a genuinely dead connection trips it.
+ * - After the body is fully flushed: waiting for GitHub's reply produces
+ *   ZERO socket activity, so the idle timer would misfire there — it is
+ *   swapped for one wide absolute response deadline instead.
+ */
+function uploadAsset(url, filePath, { inactivityMs = 180_000, responseMs = 600_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const size = fs.statSync(filePath).size;
+    let responseTimer = null;
+    const req = https.request(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.GH_TOKEN}`,
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': size,
+        'User-Agent': 'gradebook-release-script',
+      },
+    }, (res) => {
+      clearTimeout(responseTimer);
+      res.setEncoding('utf8');
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('error', reject);
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.setTimeout(inactivityMs, () => {
+      req.destroy(new Error(`upload stalled — no socket activity for ${inactivityMs / 1000}s`));
+    });
+    req.on('finish', () => {
+      req.setTimeout(0); // disable the idle timer: silence is EXPECTED while GitHub finalizes
+      responseTimer = setTimeout(() => {
+        req.destroy(new Error(`no response from GitHub within ${responseMs / 1000}s of the upload finishing`));
+      }, responseMs);
+    });
+    req.on('error', reject);
+    const src = fs.createReadStream(filePath);
+    src.on('error', (err) => req.destroy(err));
+    req.on('close', () => { clearTimeout(responseTimer); src.destroy(); });
+    src.pipe(req);
+  });
+}
+
+/**
  * Publish to GitHub Releases — deterministic and IDEMPOTENT:
  *   1. push the version tag (published releases require an existing tag)
  *   2. create the release, or reuse it if it already exists
@@ -342,30 +404,64 @@ async function publishToGitHub() {
     console.log('  latest.yml synthesized');
   }
 
-  // 4. Upload assets (replace any partial leftovers).
+  // 4. Upload assets (replace any partial leftovers) — streamed via
+  // uploadAsset(), NOT fetch(); see the comment on that function.
+  //
+  // Always consult a LIVE asset listing rather than the `release` object in
+  // hand: it goes stale the moment an upload attempt dies after the bytes
+  // actually landed (v1.0.8: the exe was complete on the release while the
+  // client saw only a timeout).
+  const listAssets = async () => {
+    const resp = await api(`/repos/${gh.owner}/${gh.repo}/releases/${release.id}/assets`);
+    if (resp.status !== 200) return fail(`Could not list ${tag} release assets (${resp.status}):`, resp);
+    return resp.json();
+  };
   for (const name of [exeName, `${exeName}.blockmap`, 'latest.yml']) {
     const filePath = path.join(root, 'dist', name);
     if (!fs.existsSync(filePath)) return fail(`dist/${name} is missing — build failed?`);
-    const leftover = (release.assets || []).find(a => a.name === name);
-    if (leftover) {
-      await api(`/repos/${gh.owner}/${gh.repo}/releases/assets/${leftover.id}`, { method: 'DELETE' });
-    }
-    const buf = fs.readFileSync(filePath);
-    const up = await fetch(
-      `https://uploads.github.com/repos/${gh.owner}/${gh.repo}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.GH_TOKEN}`,
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': String(buf.length),
-          'User-Agent': 'gradebook-release-script',
-        },
-        body: buf,
+    const size = fs.statSync(filePath).size;
+    const mb = (size / 1048576).toFixed(1);
+    for (let attempt = 1; ; attempt++) {
+      for (const leftover of (await listAssets()).filter(a => a.name === name)) {
+        const del = await api(`/repos/${gh.owner}/${gh.repo}/releases/assets/${leftover.id}`, { method: 'DELETE' });
+        if (del.status !== 204 && del.status !== 404) {
+          return fail(`Could not delete leftover asset ${name} (${del.status}):`, del);
+        }
       }
-    );
-    if (up.status !== 201) return fail(`Uploading ${name} failed (${up.status}):`, up);
-    console.log(`  uploaded ${name} (${(buf.length / 1048576).toFixed(1)} MB)`);
+      console.log(`  uploading ${name} (${mb} MB)${attempt > 1 ? ' — second attempt' : ''} …`);
+      let up;
+      try {
+        up = await uploadAsset(
+          `https://uploads.github.com/repos/${gh.owner}/${gh.repo}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`,
+          filePath
+        );
+      } catch (err) {
+        // Network-level failure. First: did the bytes land anyway? This run
+        // streamed THIS exact file, so a complete asset with the same name
+        // and byte size IS this file (v1.0.8's failure mode) — adopt it
+        // instead of re-spending the whole upload. latest.yml's sha512 stays
+        // valid: the adopted bytes are the very bytes it was computed from.
+        const landed = (await listAssets()).find(
+          a => a.name === name && a.state === 'uploaded' && a.size === size
+        );
+        if (landed) {
+          console.log(`  uploaded ${name} (${mb} MB) — confirmed on the release after a lost response`);
+          break;
+        }
+        if (attempt >= 2) {
+          return fail(
+            `Uploading ${name} failed twice (${err.message}).\n` +
+            'Re-run npm run desktop:release to repair — the publish flow is idempotent.'
+          );
+        }
+        console.log(scrub(`  ${err.message} — deleting the partial and retrying once`));
+        continue;
+      }
+      // HTTP-level failure (401/403/422/…): retrying cannot change the answer.
+      if (up.status !== 201) return fail(`Uploading ${name} failed (${up.status}):\n${up.body}`);
+      console.log(`  uploaded ${name} (${mb} MB)`);
+      break;
+    }
   }
 
   console.log(`\n✓ v${version} published to GitHub Releases — installed apps will pick it up.`);

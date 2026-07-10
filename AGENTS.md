@@ -234,7 +234,14 @@ terminal/VS Code). Preflight at script top. Steps: create+push git tag
 reuse or create, synthesize `latest.yml` if missing (sha512 base64 + size),
 DELETE leftover partial assets by id, upload `…Setup.exe`, `.blockmap`,
 `latest.yml`. Token is scrubbed from all output. Re-running repairs a partial
-release.
+release. Asset uploads stream over `node:https`, deliberately NOT `fetch` —
+undici's fixed 300s response-headers deadline killed the v1.0.8 publish AFTER
+the 113 MB installer had fully uploaded (an upload's response only arrives
+once the whole body is received, and Node exposes no knob for that deadline
+short of adding undici as a dependency). The uploader uses an inactivity
+timeout while streaming, a wide post-body response window, adopts the asset
+if it landed complete despite a lost response (same run = same bytes, so
+`latest.yml`'s sha512 stays valid), then deletes partials and retries once.
 
 **Auto-update:** `electron-updater` against the public GitHub repo. Critical
 packaging detail: root `package.json` `dependencies` contains **ONLY**
