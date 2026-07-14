@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useHotkey } from '@/lib/hooks/useHotkey';
 import { flushAutosaves } from '@/lib/hooks/useAutosave';
 import Toast from './Toast';
@@ -16,6 +16,34 @@ import Toast from './Toast';
  */
 export default function GlobalShortcuts() {
   const [savedToast, setSavedToast] = useState(null);
+
+  // Mouse wheel must NEVER change a grade (v1.7.0). Chromium spins a
+  // focused number input on wheel — and a gradebook cell is almost always
+  // focused. One app-wide capture listener kills the spin at the event
+  // level and manually forwards the scroll to the nearest scrollable
+  // ancestor (modal bodies scroll themselves; the page scrolls otherwise),
+  // so scrolling still FEELS native. Numeric inputs keep their semantics.
+  useEffect(() => {
+    const scrollParentOf = (el) => {
+      for (let n = el?.parentElement; n; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 2) return n;
+      }
+      return null;
+    };
+    const onWheel = (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement) || t.type !== 'number') return;
+      if (document.activeElement !== t) return; // unfocused inputs never spin anyway
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY;
+      const scroller = scrollParentOf(t);
+      if (scroller) scroller.scrollBy(0, dy);
+      else window.scrollBy(0, dy);
+    };
+    document.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    return () => document.removeEventListener('wheel', onWheel, { capture: true });
+  }, []);
 
   useHotkey('ctrl+s', async (e) => {
     e.preventDefault(); // never the browser's save-page dialog

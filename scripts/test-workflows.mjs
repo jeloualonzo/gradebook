@@ -201,5 +201,33 @@ const roll3 = await must('POST', `/api/subjects/${R}/rollover`, {
 check('F5: the empty option starts with zero students',
   (await must('GET', `/api/subjects/${roll3.id}/students`)).length === 0);
 
+// ============ Feature 6: remove an imported group (v1.7.0) ============
+// Matching is by full-name identity against the group's CURRENT members —
+// the move-column rule. Non-members are never touched; scores go with
+// their students; dry_run previews without side effects.
+const R6 = await mkSubject('RemoveGrp Src');
+const keepId = (await must('POST', `/api/subjects/${R6}/students`, { last_name: 'Stays', first_name: 'Sam' })).id;
+const g6 = await must('POST', '/api/groups', { name: 'Wrong Section' });
+await must('POST', `/api/groups/${g6.id}/students`, { last_name: 'Gone', first_name: 'Gina' });
+await must('POST', `/api/groups/${g6.id}/students`, { last_name: 'Gone', first_name: 'Greg' });
+await must('POST', `/api/subjects/${R6}/import-students`, { groupId: g6.id });
+const r6Students = await must('GET', `/api/subjects/${R6}/students`);
+const gina = r6Students.find(s => s.first_name === 'Gina');
+const r6Prelim = (await must('GET', `/api/subjects/${R6}/periods`)).find(p => p.type === 'PRELIM');
+const r6Quiz = r6Prelim.assessments.find(a => a.name === 'Quiz');
+const r6Col = (await must('POST', `/api/assessments/${r6Quiz.id}/columns`, { date: '2026-08-05', max_score: 10 })).id;
+await must('PUT', `/api/scores/${r6Col}/${gina.id}`, { value: 5 });
+
+const dry6 = await must('POST', `/api/subjects/${R6}/remove-group-students`, { group_id: g6.id, dry_run: true });
+check('F6: dry run counts the matches without touching anything',
+  dry6.dry_run === true && dry6.matched === 2 && dry6.roster === 3 &&
+  (await must('GET', `/api/subjects/${R6}/students`)).length === 3);
+const gone = await must('POST', `/api/subjects/${R6}/remove-group-students`, { group_id: g6.id, dry_run: false });
+const after6 = await must('GET', `/api/subjects/${R6}/students`);
+check('F6: removes exactly the group’s members', gone.removed === 2 && after6.length === 1 && after6[0].id === keepId);
+check('F6: their scores are tombstoned with them', Object.keys(await scoresOf(R6)).length === 0);
+check('F6: the group itself is untouched',
+  (await must('GET', `/api/groups/${g6.id}/students`)).length === 2);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL WORKFLOW TESTS PASSED');
 process.exit(failures ? 1 : 0);

@@ -114,8 +114,12 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
     el.select?.();
     return true;
   };
-  const columnCells = () =>
-    Array.from(document.querySelectorAll(`input[data-cell="score"][data-col="${columnId}"]`));
+  // Queries stay inside the current GRID SCOPE ([data-grid-scope]) so the
+  // main grid and a Focus Assessment modal — which render the same column's
+  // cells simultaneously — each navigate among their OWN cells only.
+  const scopeOf = (el) => el.closest('[data-grid-scope]') || document;
+  const columnCells = (target = inputRef.current) =>
+    Array.from(scopeOf(target).querySelectorAll(`input[data-cell="score"][data-col="${columnId}"]`));
   const rowCells = (target) =>
     Array.from(target.closest('tr')?.querySelectorAll('input[data-cell="score"]') || []);
 
@@ -124,7 +128,7 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
     // (Excel-style corner jumps). Handled before the modifier guard below.
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'Home' || e.key === 'End')) {
       e.preventDefault();
-      const all = Array.from(document.querySelectorAll('input[data-cell="score"]'));
+      const all = Array.from(scopeOf(e.target).querySelectorAll('input[data-cell="score"]'));
       focusCell(e.key === 'Home' ? all[0] : all[all.length - 1]);
       return;
     }

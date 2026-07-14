@@ -16,6 +16,10 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import Modal from '@/components/Modal';
 import Toast from '@/components/Toast';
 import StudentFocusPanel from '@/components/StudentFocusPanel';
+import ViewMenu from '@/components/ViewMenu';
+import ContextMenu from '@/components/ContextMenu';
+import AssessmentFocusModal from '@/components/AssessmentFocusModal';
+import RemoveGroupDialog from '@/components/RemoveGroupDialog';
 
 export default function GradebookPage() {
   const { id } = useParams();
@@ -97,15 +101,56 @@ export default function GradebookPage() {
   );
 
   const viewActive = viewIds !== null;
-  const sortLabels = { az: 'A–Z', asc: 'Grade ↑', desc: 'Grade ↓' };
-  const cycleSort = () => {
-    const next = viewSort === 'az' ? 'asc' : viewSort === 'asc' ? 'desc' : 'az';
-    applyView(viewMode, viewThreshold, next);
-  };
   const toggleStats = () => {
     setShowStats(prev => {
       try { window.localStorage.setItem('gb-stats-footer', prev ? '0' : '1'); } catch { /* non-fatal */ }
       return !prev;
+    });
+  };
+
+  // Missing-score highlight toggle (v1.7.0) — the amber cell tint, on by
+  // default, persisted per device. The missing-work CHIPS are unaffected.
+  const [showMissingHighlight, setShowMissingHighlight] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('gb-missing-hl') !== '0';
+  });
+  const toggleMissingHighlight = () => {
+    setShowMissingHighlight(prev => {
+      try { window.localStorage.setItem('gb-missing-hl', prev ? '0' : '1'); } catch { /* non-fatal */ }
+      return !prev;
+    });
+  };
+
+  // Toolbar (v1.7.0): Office-style clusters — identity · view lens ·
+  // history · frequent actions · ⋯ overflow. Adaptive: below the tier
+  // width, Attendance/Students collapse into the ⋯ menu instead of wrapping.
+  const headerRef = useRef(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(() => setCompact(el.clientWidth < 900));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const [moreMenu, setMoreMenu] = useState(null);
+  const [removeGroupOpen, setRemoveGroupOpen] = useState(false);
+  const [focusColumn, setFocusColumn] = useState(null); // Focus Assessment mode
+  const openMoreMenu = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setMoreMenu({
+      x: r.right,
+      y: r.bottom + 4,
+      items: [
+        ...(compact ? [
+          ...(prelimPeriod ? [{ label: 'Quick Attendance', onClick: () => router.push(`/subjects/${id}/attendance?periodId=${prelimPeriod.id}`) }] : []),
+          { label: 'Students…', onClick: () => setStudentsOpen(true) },
+        ] : []),
+        { label: 'Import students from a group…', separatorBefore: compact, onClick: () => setImportOpen(true) },
+        { label: 'Remove an imported group…', onClick: () => setRemoveGroupOpen(true) },
+        { label: 'Export to Excel', separatorBefore: true, onClick: () => { window.location.href = `/api/export/excel/${id}`; } },
+        { label: 'Export to PDF', onClick: () => window.open(`/api/export/pdf/${id}`, '_blank', 'noreferrer') },
+      ],
     });
   };
 
@@ -207,7 +252,7 @@ export default function GradebookPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 shrink-0">
+      <header ref={headerRef} className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 shrink-0">
         <button onClick={() => router.push('/')} className="text-gray-400 hover:text-gray-700 transition-colors">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="15 18 9 12 15 6" />
@@ -223,45 +268,6 @@ export default function GradebookPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Views (Phase 3a): non-destructive lenses — filter/rank freeze on
-              apply; the amber chip + "All students" restore the full roster. */}
-          <div className="flex items-center gap-1">
-            <select
-              value={viewMode}
-              onChange={e => applyView(e.target.value, viewThreshold, viewSort)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              title="View — a lens on the roster; the data never changes"
-            >
-              <option value="all">All students</option>
-              <option value="missing">With missing work</option>
-              <option value="below">Below threshold</option>
-            </select>
-            {viewMode === 'below' && (
-              <input
-                type="number"
-                value={viewThreshold}
-                min="0"
-                max="100"
-                onChange={e => applyView('below', parseFloat(e.target.value) || 0, viewSort)}
-                className="w-14 text-xs border border-gray-200 rounded-lg px-1.5 py-1.5 text-center bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                title="Failing threshold — a view setting only, never a grade policy"
-              />
-            )}
-            <button
-              onClick={cycleSort}
-              className={`px-2 py-1.5 text-xs border rounded-lg ${viewSort !== 'az' ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
-              title="Sort the view (order freezes until changed — rows never jump mid-entry)"
-            >
-              {sortLabels[viewSort]}
-            </button>
-            <button
-              onClick={toggleStats}
-              className={`px-2 py-1.5 text-xs border rounded-lg ${showStats ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
-              title="Class statistics footer — averages and missing counts per column"
-            >
-              Stats
-            </button>
-          </div>
           {viewActive ? (
             <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
               {viewStudents.length} of {students.length}
@@ -276,6 +282,19 @@ export default function GradebookPage() {
           ) : (
             <span className="text-xs text-gray-400">{students.length} student{students.length !== 1 ? 's' : ''}</span>
           )}
+
+          <ViewMenu
+            viewMode={viewMode}
+            viewThreshold={viewThreshold}
+            viewSort={viewSort}
+            applyView={applyView}
+            showStats={showStats}
+            toggleStats={toggleStats}
+            showMissingHighlight={showMissingHighlight}
+            toggleMissingHighlight={toggleMissingHighlight}
+          />
+
+          <div className="w-px h-5 bg-gray-200" aria-hidden="true" />
 
           <div className="flex items-center gap-1">
             <button
@@ -300,28 +319,11 @@ export default function GradebookPage() {
             </button>
           </div>
 
-          <button
-            onClick={() => setImportOpen(true)}
-            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
-            title="Copy students from a Student Group"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            Import Students
-          </button>
+          <div className="w-px h-5 bg-gray-200" aria-hidden="true" />
 
-          <button
-            onClick={() => setStudentsOpen(true)}
-            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-            </svg>
-            Students
-          </button>
-
-          {prelimPeriod && (
+          {/* Frequent actions stay visible; below the tier width they fold
+              into the ⋯ menu instead of wrapping (Office overflow pattern). */}
+          {!compact && prelimPeriod && (
             <Link
               href={`/subjects/${id}/attendance?periodId=${prelimPeriod.id}`}
               className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
@@ -333,27 +335,27 @@ export default function GradebookPage() {
             </Link>
           )}
 
-          <a
-            href={`/api/export/excel/${id}`}
-            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Excel
-          </a>
+          {!compact && (
+            <button
+              onClick={() => setStudentsOpen(true)}
+              className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+              </svg>
+              Students
+            </button>
+          )}
 
-          <a
-            href={`/api/export/pdf/${id}`}
-            target="_blank"
-            rel="noreferrer"
-            className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-1.5"
+          <button
+            onClick={openMoreMenu}
+            className="p-1.5 text-gray-500 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"
+            title="More — import, remove group, export"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />
             </svg>
-            PDF
-          </a>
+          </button>
         </div>
       </header>
 
@@ -390,7 +392,9 @@ export default function GradebookPage() {
           students={viewStudents}
           scores={scores}
           showStats={showStats}
+          showMissingHighlight={showMissingHighlight}
           rosterNumbers={rosterNumbers}
+          onFocusColumn={setFocusColumn}
           onVisiblePeriodChange={setVisiblePeriod}
           onUpdateScore={updateScore}
           onBulkUpdate={bulkUpdateScores}
@@ -458,6 +462,35 @@ export default function GradebookPage() {
           refreshScores();
         }}
       />
+
+      <ContextMenu menu={moreMenu} onClose={() => setMoreMenu(null)} />
+
+      {removeGroupOpen && (
+        <RemoveGroupDialog
+          subjectId={id}
+          onClose={() => setRemoveGroupOpen(false)}
+          onRemoved={(n) => {
+            setRemoveGroupOpen(false);
+            refreshStudents();
+            refreshScores();
+            showToast(`Removed ${n} student${n === 1 ? '' : 's'}`);
+          }}
+        />
+      )}
+
+      {focusColumn && (
+        <AssessmentFocusModal
+          focus={focusColumn}
+          students={viewStudents}
+          scores={scores}
+          rosterNumbers={rosterNumbers}
+          onUpdateScore={updateScore}
+          onAttendanceApplied={handleAttendanceApplied}
+          onHistoryPush={history.push}
+          onSaveError={(m) => showToast(m, 'error')}
+          onClose={() => setFocusColumn(null)}
+        />
+      )}
 
       {focusStudent && (
         <StudentFocusPanel

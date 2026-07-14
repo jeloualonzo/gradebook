@@ -28,6 +28,7 @@ export default function GridSelectionLayer({
   getScores,      // () => live scores map
   onApplyRange,   // (entries: [{column_id, student_id, value|null}], label) => void
   onOpenMenu,     // (event, items) => void — the grid's shared context menu
+  onFocusColumn,  // (columnId) => void — opens Focus Assessment mode
 }) {
   // One model instance for the component's lifetime (useState initializer —
   // the lint-sanctioned way to hold a stable non-render value).
@@ -656,6 +657,9 @@ export default function GridSelectionLayer({
       if (multi) items.push({ label: `Clear ${model.size()} cells`, danger: true, separatorBefore: !multi, onClick: () => clearSelection() });
       items.push({ label: 'Select column', separatorBefore: !multi, onClick: () => model.selectColumn(at.c) });
       items.push({ label: 'Select row', onClick: () => model.selectRow(at.r) });
+      if (onFocusColumn && colId) {
+        items.push({ label: 'Focus assessment…', separatorBefore: true, onClick: () => onFocusColumn(colId) });
+      }
       onOpenMenu(e, items);
     };
 
@@ -681,7 +685,7 @@ export default function GridSelectionLayer({
       grid.removeEventListener('cut', onCut);
       grid.removeEventListener('paste', onPaste);
     };
-  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll, getScores, onApplyRange]);
+  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll, getScores, onApplyRange, onFocusColumn]);
 
   return (
     <>

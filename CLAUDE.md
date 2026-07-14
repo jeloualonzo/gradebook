@@ -185,6 +185,16 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- Polish batch (v1.7.0): context-menu row highlight; native-proportional
+  sticky-scrollbar thumb with the container's own bar hidden; wheel-proof
+  number inputs (owner chose keeping numeric semantics over text inputs —
+  a document-level guard kills the spin and forwards the scroll); the undo
+  split (native text editing + EditTextMenu everywhere, Excel session undo
+  stays in the grid); Office-style adaptive toolbar with the View popover
+  (left sidebar explicitly rejected: grid width wins); missing-highlight
+  toggle; Focus Assessment mode (same ScoreCells, [data-grid-scope]
+  navigation); remove-imported-group by name identity with dry-run
+  preview; subject list count + combined term + persisted sort
 - ROADMAP Phase 3b — rollover + student focus (v1.6.0): the semester
   rollover wizard (Home right-click → new term in one transaction —
   structure and attendance config always, roster empty/copied/from-group,

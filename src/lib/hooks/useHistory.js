@@ -78,6 +78,14 @@ export function useHistory({ onNotify } = {}) {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const k = e.key.toLowerCase();
+      if (k !== 'z' && k !== 'y') return;
+      // The undo split (v1.7.0): ORDINARY text fields — names, titles,
+      // settings, search boxes — keep the browser's native character-level
+      // Ctrl+Z/Y, exactly like Notepad/Office. GRID cells keep the Excel
+      // session model: their edits commit as history entries, so app undo
+      // is the right response there (the shipped Phase 2 contract).
+      const editable = e.target?.closest?.('input, textarea, [contenteditable="true"]');
+      if (editable && !editable.closest('.gradebook-table')) return;
       if (k === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();

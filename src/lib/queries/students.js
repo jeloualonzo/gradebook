@@ -1,4 +1,5 @@
 import db from '@/lib/db';
+import { fullNameKey } from './groups';
 
 export async function getStudentsBySubject(subjectId) {
   // Students are ALWAYS presented alphabetically (last, first, middle name)
@@ -47,6 +48,41 @@ export async function deleteStudent(id) {
     );
     db.run('UPDATE students SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, id]);
   });
+}
+
+/**
+ * Remove every student in a subject whose name matches a member of a
+ * Student Group (v1.7.0 — "I imported the wrong section"). Students carry
+ * no origin link (imports copy rows, by design), so matching is by
+ * full-name IDENTITY against the group's CURRENT members — the same rule
+ * move-column uses. Removal tombstones student + scores (ordinary deletes;
+ * they sync as such). dry_run reports the count without touching anything.
+ */
+export async function removeGroupStudents(subjectId, groupId, { dryRun = false } = {}) {
+  let result = null;
+  db.transaction(() => {
+    const members = db.all(
+      'SELECT last_name, first_name, middle_name, suffix FROM group_students WHERE group_id = ? AND deleted_at IS NULL',
+      [groupId]
+    );
+    const memberKeys = new Set(members.map(fullNameKey));
+    const roster = db.all(
+      'SELECT * FROM students WHERE subject_id = ? AND deleted_at IS NULL',
+      [subjectId]
+    );
+    const matched = roster.filter(s => memberKeys.has(fullNameKey(s)));
+    if (dryRun) {
+      result = { dry_run: true, matched: matched.length, roster: roster.length };
+      return;
+    }
+    const now = db.now();
+    for (const s of matched) {
+      db.run('UPDATE scores SET deleted_at=?, updated_at=? WHERE student_id=? AND deleted_at IS NULL', [now, now, s.id]);
+      db.run('UPDATE students SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, s.id]);
+    }
+    result = { removed: matched.length, roster: roster.length };
+  });
+  return result;
 }
 
 export async function reorderStudents(orderedIds) {

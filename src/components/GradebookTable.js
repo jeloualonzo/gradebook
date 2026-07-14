@@ -89,7 +89,9 @@ export default function GradebookTable({
   onUpdateScore,
   onBulkUpdate,
   showStats,
+  showMissingHighlight,
   rosterNumbers,
+  onFocusColumn,
   onAttendanceApplied,
   onRefreshPeriods,
   onRefreshData,
@@ -110,12 +112,29 @@ export default function GradebookTable({
   const [newAssessmentName, setNewAssessmentName] = useState('');
 
   // One context menu for the whole grid (portaled to <body>).
+  // While a menu is open, the row it came from stays marked (v1.7.0) — a
+  // distinct tint from hover, so "whose menu is this?" is always answered.
+  // Imperative class toggling, like every other transient grid highlight.
   const [menu, setMenu] = useState(null);
+  const menuRowRef = useRef(null);
+  const clearMenuRow = useCallback(() => {
+    menuRowRef.current?.classList.remove('gb-menu-row');
+    menuRowRef.current = null;
+  }, []);
   const openMenu = useCallback((event, items) => {
     event.preventDefault();
+    clearMenuRow();
+    const tr = event.target?.closest?.('tr[data-student-row]');
+    if (tr) {
+      tr.classList.add('gb-menu-row');
+      menuRowRef.current = tr;
+    }
     setMenu({ x: event.clientX, y: event.clientY, items });
-  }, []);
-  const closeMenu = useCallback(() => setMenu(null), []);
+  }, [clearMenuRow]);
+  const closeMenu = useCallback(() => {
+    clearMenuRow();
+    setMenu(null);
+  }, [clearMenuRow]);
 
   // --- Active-column indication ---------------------------------------------
   // When a cell of an assessment column is FOCUSED (score / date / max), that
@@ -183,7 +202,14 @@ export default function GradebookTable({
     const grid = gridRef.current;
     if (!grid) return;
     const ro = new ResizeObserver(() => {
-      setProxyState({ w: grid.scrollWidth, visible: grid.scrollWidth > grid.clientWidth + 2 });
+      // Native-proportional thumb (v1.7.0): a scrollbar thumb's size is
+      // track × (viewport ÷ content). The proxy is a REAL scrollbar, so we
+      // get that ratio by sizing its inner spacer to
+      // track × (content ÷ viewport) — the thumb then represents exactly
+      // what a native Windows scrollbar would show.
+      const track = proxyRef.current?.clientWidth || STICKY_SCROLLBAR_WIDTH_PX;
+      const ratio = grid.clientWidth > 0 ? grid.scrollWidth / grid.clientWidth : 1;
+      setProxyState({ w: Math.round(track * ratio), visible: grid.scrollWidth > grid.clientWidth + 2 });
     });
     ro.observe(grid);
     const table = grid.querySelector('table');
@@ -350,6 +376,20 @@ export default function GradebookTable({
 
   const wrapRef = useRef(null);
 
+  // Focus Assessment mode (v1.7.0): entry points pass a columnId; this
+  // resolver hands the page the full column/assessment/period context.
+  const handleFocusColumn = useCallback((columnId) => {
+    for (const period of periods) {
+      for (const a of period.assessments) {
+        const col = a.columns.find(c => String(c.id) === String(columnId));
+        if (col) {
+          onFocusColumn?.({ column: col, assessment: a, periodType: period.type });
+          return;
+        }
+      }
+    }
+  }, [periods, onFocusColumn]);
+
   // --- Period-closing cluster (Phase 3a) -------------------------------------
   // "Missing" = blanks in ACTIVE columns (the class took it, this student has
   // nothing) — see src/lib/classStats.js for the rule and its tests.
@@ -502,7 +542,15 @@ export default function GradebookTable({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-    <div ref={gridRef} className="overflow-x-auto w-full" onScroll={onGridScroll} onFocusCapture={handleGridFocus} onBlurCapture={handleGridBlur} onKeyDown={handleGridKeyDown}>
+    <div
+      ref={gridRef}
+      data-grid-scope
+      className={`overflow-x-auto w-full gb-grid-scroll ${showMissingHighlight === false ? 'gb-hide-missing' : ''}`}
+      onScroll={onGridScroll}
+      onFocusCapture={handleGridFocus}
+      onBlurCapture={handleGridBlur}
+      onKeyDown={handleGridKeyDown}
+    >
       {/* position:relative wrapper — the selection overlay's coordinate space
           (it scrolls WITH the table, so no scroll listeners are needed). */}
       <div ref={wrapRef} className="relative w-max">
@@ -642,6 +690,7 @@ export default function GradebookTable({
                         onHistoryPush={onHistoryPush}
                         onSaveError={onSaveError}
                         onOpenMenu={openMenu}
+                        onFocusColumn={handleFocusColumn}
                       />
                     ))}
                   </SortableContext>
@@ -680,6 +729,7 @@ export default function GradebookTable({
                       onHistoryPush={onHistoryPush}
                       onSaveError={onSaveError}
                       onOpenMenu={openMenu}
+                      onFocusColumn={handleFocusColumn}
                     />
                   ))}
                 </React.Fragment>
@@ -711,6 +761,7 @@ export default function GradebookTable({
                       onHistoryPush={onHistoryPush}
                       onSaveError={onSaveError}
                       onOpenMenu={openMenu}
+                      onFocusColumn={handleFocusColumn}
                     />
                   ))}
                 </React.Fragment>
@@ -880,6 +931,7 @@ export default function GradebookTable({
         getScores={getScores}
         onApplyRange={handleApplyRange}
         onOpenMenu={openMenu}
+        onFocusColumn={handleFocusColumn}
       />
       </div>
     </div>

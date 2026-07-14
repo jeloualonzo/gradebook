@@ -51,6 +51,7 @@ function AssessmentBlock({
   onHistoryPush,
   onSaveError,
   onOpenMenu,
+  onFocusColumn,
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
@@ -479,7 +480,10 @@ function AssessmentBlock({
   // Right-click menu for one date column. "Edit max score" focuses the max
   // input in the row below (located via its data attribute).
   const columnMenuItems = (col) => [
-    { label: 'Edit date…', onClick: () => setEditingDate(col.id) },
+    // Focused grading (v1.7.0): one column, every student, zero horizontal
+    // scrolling — the same editing cells as the grid, in a floating view.
+    { label: 'Focus assessment…', onClick: () => onFocusColumn?.(col.id) },
+    { label: 'Edit date…', separatorBefore: true, onClick: () => setEditingDate(col.id) },
     {
       label: 'Edit max score…',
       onClick: () => {

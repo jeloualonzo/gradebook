@@ -286,7 +286,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-class-stats.mjs` (25) | Period-closing semantics (active-column rule, fill-blanks scopes, footer math, thresholds, ranking) + term sequencing (rollover defaults) + the student-focus model (P/L/A letters via config, missing list, grade agreement with the calculator) | Fixtures, no I/O |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
-| `test-workflows.mjs` (34) | Group-from-subject, move-column, counts-as-attendance, bulk attendance parity, semester rollover (structure always · roster by choice · dated columns and scores never) | Live instance (3171) |
+| `test-workflows.mjs` (38) | Group-from-subject, move-column, counts-as-attendance, bulk attendance parity, semester rollover, remove-imported-group (name-identity matching, dry-run preview, scores travel with their students, groups untouched) | Live instance (3171) |
 | `test-window-state.mjs` (30) | Bounds sanitizing, zoom clamp/persist, full manage() lifecycle | Stub Electron window |
 
 Run the lab: build plain standalone, `mkdir -p /tmp/sync-lab/{a,b,share}`,
@@ -407,6 +407,22 @@ the remote blob SHA against local `git hash-object`.
   Deliberately deferred there: printable slip (print pack), student notes
   (synced data — needs the schema + snapshot discussion), per-cell history
   (the app stores none by design).
+- Polish v1.7.0, the load-bearing details: the right-clicked row stays
+  slate-tinted while its menu is open (gb-menu-row, imperative); the sticky
+  proxy scrollbar's thumb is native-proportional (spacer = track ×
+  content/viewport) and the grid container's own bar is hidden — ONE
+  horizontal scrollbar; a document-level wheel guard prevents focused
+  number inputs from spinning while forwarding the scroll (grades are
+  wheel-proof, numeric semantics kept); THE UNDO SPLIT — ordinary text
+  fields get native Ctrl+Z/Y and the EditTextMenu right-click menu
+  (VS Code-style, works in browser dev too), grid cells keep the Excel
+  session model (useHistory skips editable targets outside
+  .gradebook-table); the toolbar is clustered Office-style (View popover ·
+  history · frequent actions · ⋯ overflow) with a width-tier collapse;
+  missing-highlight toggle (gb-hide-missing, chips unaffected,
+  device-persisted); Focus Assessment mode renders the SAME ScoreCells in
+  a modal — navigation scopes to the nearest [data-grid-scope], never
+  cross-talking with the grid behind it.
   Deliberate deviations, documented: Home/End = first/last student in the
   COLUMN, PageUp/Down = horizontal period paging, column select is
   keyboard/context-menu (date headers are editable — editing wins).

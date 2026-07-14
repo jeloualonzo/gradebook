@@ -1,7 +1,14 @@
 import db from '@/lib/db';
 
 export async function getAllSubjects() {
-  return db.all('SELECT * FROM subjects WHERE deleted_at IS NULL ORDER BY created_at DESC');
+  // student_count rides along for the Home list (v1.7.0) — active students
+  // only, one correlated subquery (indexed on students.subject_id).
+  return db.all(`
+    SELECT s.*,
+      (SELECT COUNT(*) FROM students st WHERE st.subject_id = s.id AND st.deleted_at IS NULL) AS student_count
+    FROM subjects s
+    WHERE s.deleted_at IS NULL
+    ORDER BY s.created_at DESC`);
 }
 
 export async function getSubjectById(id) {

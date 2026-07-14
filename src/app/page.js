@@ -35,7 +35,15 @@ export default function HomePage() {
   const [fYear, setFYear] = useState('');
   const [fSection, setFSection] = useState('');
   const [fOwner, setFOwner] = useState('');
-  const [sort, setSort] = useState({ key: 'subject_code', dir: 1 });
+  // Sort preference persists across launches (v1.7.0, device-local).
+  const [sort, setSort] = useState(() => {
+    if (typeof window === 'undefined') return { key: 'subject_code', dir: 1 };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('gb-subjects-sort') || 'null');
+      if (saved?.key && (saved.dir === 1 || saved.dir === -1)) return saved;
+    } catch { /* corrupt — default */ }
+    return { key: 'subject_code', dir: 1 };
+  });
 
   // One context menu for the list (right-click a row, or its ⋮ button).
   const [menu, setMenu] = useState(null);
@@ -180,7 +188,15 @@ export default function HomePage() {
   );
 
   // ---- Sorting (click a column header; suffix: code-less subjects last) -----
+  const SEM_ORDER = { '1st': 0, '2nd': 1, Summer: 2 };
   const cmp = (a, b, key) => {
+    if (key === 'student_count') return (a.student_count || 0) - (b.student_count || 0);
+    if (key === 'term') {
+      // The combined "Term" column sorts chronologically: year, then semester.
+      const y = String(a.school_year ?? '').localeCompare(String(b.school_year ?? ''), undefined, { numeric: true });
+      if (y !== 0) return y;
+      return (SEM_ORDER[a.semester] ?? 9) - (SEM_ORDER[b.semester] ?? 9);
+    }
     const av = key === 'subject_code' ? (a.subject_code || '￿') : String(a[key] ?? '');
     const bv = key === 'subject_code' ? (b.subject_code || '￿') : String(b[key] ?? '');
     return av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });
@@ -189,7 +205,11 @@ export default function HomePage() {
     (cmp(a, b, sort.key) || cmp(a, b, 'name') || cmp(a, b, 'section')) * sort.dir
   );
   const toggleSort = (key) =>
-    setSort(prev => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 }));
+    setSort(prev => {
+      const next = prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 };
+      try { window.localStorage.setItem('gb-subjects-sort', JSON.stringify(next)); } catch { /* non-fatal */ }
+      return next;
+    });
 
   const subjectMenuItems = (s) => [
     { label: 'Open', onClick: () => router.push(`/subjects/${s.id}`) },
@@ -299,8 +319,8 @@ export default function HomePage() {
                   {sortHeader('Code', 'subject_code', 'w-28')}
                   {sortHeader('Subject Title', 'name')}
                   {sortHeader('Section', 'section', 'w-28')}
-                  {sortHeader('Semester', 'semester', 'w-24')}
-                  {sortHeader('School Year', 'school_year', 'w-28')}
+                  {sortHeader('Term', 'term', 'w-44')}
+                  {sortHeader('Students', 'student_count', 'w-24')}
                   {hasForeign && <th className="text-left px-3 py-2 font-medium text-gray-500 w-28">Owner</th>}
                   <th className="w-10" />
                 </tr>
@@ -323,8 +343,14 @@ export default function HomePage() {
                       </td>
                       <td className="px-3 py-2 text-gray-900 font-medium">{s.name}</td>
                       <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{s.section}</td>
-                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{SEMESTER_LABELS[s.semester] || s.semester}</td>
-                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{s.school_year}</td>
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                        {SEMESTER_LABELS[s.semester] || s.semester} <span className="text-gray-300">·</span> {s.school_year}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                        {s.student_count > 0
+                          ? s.student_count
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       {hasForeign && (
                         <td className="px-3 py-2 whitespace-nowrap">
                           {owner
