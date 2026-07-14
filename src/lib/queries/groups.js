@@ -248,6 +248,7 @@ export async function createGroupFromSubject(subjectId, name) {
 export async function importGroupIntoSubject(subjectId, groupId, { skipDuplicates = false } = {}) {
   let imported = 0;
   let skipped = 0;
+  const createdIds = []; // returned so the import is UNDOABLE (session history)
   db.transaction(() => {
     const groupStudents = db.all(
       `SELECT * FROM group_students WHERE group_id = ? AND deleted_at IS NULL
@@ -271,12 +272,14 @@ export async function importGroupIntoSubject(subjectId, groupId, { skipDuplicate
         continue;
       }
       seen.add(fullNameKey(s));
+      const newId = db.newId();
       db.run(
         'INSERT INTO students (id, subject_id, last_name, first_name, middle_name, suffix, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [db.newId(), subjectId, s.last_name, s.first_name, s.middle_name, s.suffix || '', order++, now, now]
+        [newId, subjectId, s.last_name, s.first_name, s.middle_name, s.suffix || '', order++, now, now]
       );
+      createdIds.push(newId);
       imported++;
     }
   });
-  return { imported, skipped };
+  return { imported, skipped, created_ids: createdIds };
 }

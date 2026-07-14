@@ -92,6 +92,7 @@ export default function GradebookTable({
   showMissingHighlight,
   rosterNumbers,
   onFocusColumn,
+  onNotify,
   onAttendanceApplied,
   onRefreshPeriods,
   onRefreshData,
@@ -546,6 +547,9 @@ export default function GradebookTable({
       ref={gridRef}
       data-grid-scope
       className={`overflow-x-auto w-full gb-grid-scroll ${showMissingHighlight === false ? 'gb-hide-missing' : ''}`}
+      // Dock-aware layout (v1.7.1): the sticky stats footer pins ABOVE the
+      // floating scrollbar dock via this variable (see globals.css).
+      style={{ '--gb-dock-h': proxyState.visible ? '42px' : '0px' }}
       onScroll={onGridScroll}
       onFocusCapture={handleGridFocus}
       onBlurCapture={handleGridBlur}
@@ -691,6 +695,7 @@ export default function GradebookTable({
                         onSaveError={onSaveError}
                         onOpenMenu={openMenu}
                         onFocusColumn={handleFocusColumn}
+                        onNotify={onNotify}
                       />
                     ))}
                   </SortableContext>
@@ -730,6 +735,7 @@ export default function GradebookTable({
                       onSaveError={onSaveError}
                       onOpenMenu={openMenu}
                       onFocusColumn={handleFocusColumn}
+                      onNotify={onNotify}
                     />
                   ))}
                 </React.Fragment>
@@ -762,6 +768,7 @@ export default function GradebookTable({
                       onSaveError={onSaveError}
                       onOpenMenu={openMenu}
                       onFocusColumn={handleFocusColumn}
+                      onNotify={onNotify}
                     />
                   ))}
                 </React.Fragment>
@@ -907,7 +914,7 @@ export default function GradebookTable({
                         const s = footerStats.perColumn.get(String(col.id));
                         const m = s ? s.missing : 0;
                         return (
-                          <td key={col.id} className={`gb-foot-cell ${m > 0 && s.entered > 0 ? 'text-amber-600 font-semibold' : 'text-gray-300'}`}>
+                          <td key={col.id} className={`gb-foot-cell ${m > 0 && s.entered > 0 ? 'text-amber-600 font-semibold gb-missing-cue' : 'text-gray-300'}`}>
                             {s && s.entered > 0 ? (m > 0 ? m : '·') : ''}
                           </td>
                         );
@@ -935,6 +942,9 @@ export default function GradebookTable({
       />
       </div>
     </div>
+    {/* In-flow spacer (the StatusBar trick): when the dock floats, the page
+        gains real bottom room — the last rows are never hidden under it. */}
+    {proxyState.visible && <div className="h-11" aria-hidden="true" />}
     {fillConfirm && (
       <ConfirmDialog
         open

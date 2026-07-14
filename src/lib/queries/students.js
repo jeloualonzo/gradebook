@@ -80,9 +80,45 @@ export async function removeGroupStudents(subjectId, groupId, { dryRun = false }
       db.run('UPDATE scores SET deleted_at=?, updated_at=? WHERE student_id=? AND deleted_at IS NULL', [now, now, s.id]);
       db.run('UPDATE students SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL', [now, now, s.id]);
     }
-    result = { removed: matched.length, roster: roster.length };
+    // removed_ids make the operation UNDOABLE (batch revive — session history).
+    result = { removed: matched.length, roster: roster.length, removed_ids: matched.map(s => s.id) };
   });
   return result;
+}
+
+/**
+ * Session-history workhorse (v1.7.1): tombstone or revive a specific set of
+ * students in one transaction. Undoing an import removes exactly the rows
+ * it created; redoing revives THE SAME rows (stable ids across undo/redo —
+ * no churn for sync to chew on). Reviving restores each student plus the
+ * scores tombstoned at the same instant (the matched-timestamp rule the
+ * recycle bin uses), stamped with a fresh updated_at so the revival wins
+ * over the tombstone everywhere (engine-tested LWW semantics).
+ */
+export async function setStudentsDeleted(subjectId, studentIds, { deleted }) {
+  let changed = 0;
+  db.transaction(() => {
+    const now = db.now();
+    for (const id of studentIds || []) {
+      const s = db.get('SELECT * FROM students WHERE id = ? AND subject_id = ?', [id, subjectId]);
+      if (!s) continue;
+      if (deleted) {
+        if (s.deleted_at) continue;
+        db.run('UPDATE scores SET deleted_at=?, updated_at=? WHERE student_id=? AND deleted_at IS NULL', [now, now, id]);
+        db.run('UPDATE students SET deleted_at=?, updated_at=? WHERE id=?', [now, now, id]);
+        changed++;
+      } else {
+        if (!s.deleted_at) continue;
+        db.run(
+          'UPDATE scores SET deleted_at=NULL, updated_at=? WHERE student_id=? AND deleted_at=?',
+          [now, id, s.deleted_at]
+        );
+        db.run('UPDATE students SET deleted_at=NULL, updated_at=? WHERE id=?', [now, id]);
+        changed++;
+      }
+    }
+  });
+  return { changed };
 }
 
 export async function reorderStudents(orderedIds) {

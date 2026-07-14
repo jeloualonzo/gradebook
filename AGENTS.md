@@ -268,6 +268,16 @@ boot + every 4h; downloads in background; installs on "Restart and Update" (a
 pre-update sync runs first) or on normal quit. Status shown in the status-bar
 pill and Settings → General. Dev runs (`!app.isPackaged`) never self-update.
 
+**Versioning policy (Semantic Versioning, adopted v1.7.1):**
+PATCH (1.7.x) = bug fixes, UI polish, performance, small workflow
+improvements — no significant new features. MINOR (1.x.0) = new features,
+new workflows, UI redesigns, backward-compatible enhancements — one shipped
+roadmap batch is typically a minor. MAJOR (2.0.0) = large architectural
+milestones or major redesigns — reserved for completing a major roadmap
+milestone (finishing the v2 vision is the natural 2.0.0). Note the version
+here is a human intent signal: electron-updater only compares order, and
+the DB/snapshot versions (§6) are entirely separate machines.
+
 **Standard release routine:** bump `version` in package.json → commit/push →
 on the Windows machine: `git pull`, `npm run desktop:release`. Both laptops
 auto-update. The repo tracks `package-lock.json` — keep it in sync with any
@@ -286,7 +296,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-class-stats.mjs` (25) | Period-closing semantics (active-column rule, fill-blanks scopes, footer math, thresholds, ranking) + term sequencing (rollover defaults) + the student-focus model (P/L/A letters via config, missing list, grade agreement with the calculator) | Fixtures, no I/O |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
-| `test-workflows.mjs` (38) | Group-from-subject, move-column, counts-as-attendance, bulk attendance parity, semester rollover, remove-imported-group (name-identity matching, dry-run preview, scores travel with their students, groups untouched) | Live instance (3171) |
+| `test-workflows.mjs` (47) | Group-from-subject, move-column, counts-as-attendance (live + RETROACTIVE backfill: blanks-only, inert disable, idempotent re-enable), bulk attendance parity, semester rollover, remove-imported-group, students-batch remove/revive (same-rows undo contract, import returns created ids) | Live instance (3171) |
 | `test-window-state.mjs` (30) | Bounds sanitizing, zoom clamp/persist, full manage() lifecycle | Stub Electron window |
 
 Run the lab: build plain standalone, `mkdir -p /tmp/sync-lab/{a,b,share}`,
@@ -321,6 +331,21 @@ the remote blob SHA against local `git hash-object`.
   `data-cell="score|max"`, `data-col`, `data-col-head`, `data-max-for`,
   `data-student-row`, `data-period-head`, `data-rename-assessment`,
   `data-autofocus`, `data-modal-close`, `data-att-row`.
+- **Three levels of recovery (v1.7.1) — the undo contract.** LEVEL 1, cell
+  editing (always undoable): score edits, paste, fill, clear, every range
+  operation. LEVEL 2, gradebook structure (undoable whenever technically
+  possible — "if it happened inside the gradebook, Undo should probably
+  work"): group import / remove-imported-group / add-edit-delete student
+  (via `students-batch` remove/revive — undo and redo cycle over THE SAME
+  rows, stable ids; revive restores the scores tombstoned at the same
+  instant and wins over the tombstone by LWW), assessment
+  create/delete/rename/reorder, column add/remove/date/max, weight edits,
+  counts-as-attendance toggles. History entries are SELF-DESCRIPTIVE
+  ('import 12 students from "BSIS 3A"') — future history viewers get labels
+  for free. LEVEL 3, outside the gradebook (deliberately NOT undo): subject
+  delete/restore and group delete/restore (Recycle Bin), semester rollover
+  (a new subject; the bin covers regret), conflict restores (the reviewed
+  flow). History is per-session and clears on reload — Excel's own rule.
 - **Saves are optimistic + debounced.** `useAutosave` (400ms, module-level
   registry so Ctrl+S can `flushAutosaves()`); failures roll back to the last
   server-confirmed value with an error toast. Commits (blur/Enter) push ONE

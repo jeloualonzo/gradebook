@@ -297,13 +297,15 @@ input[type="number"] {
   z-index: 9;
   height: 22px;
 }
-/* Two pinned rows stack: the first sits one row-height above the second. */
+/* Two pinned rows stack, ABOVE the floating scrollbar dock when it is
+   visible (--gb-dock-h is set by the grid container — v1.7.1): the dock
+   must never cover statistics, Excel's totals-above-scrollbar layering. */
 .gb-stats-foot tr:first-child td {
-  bottom: 22px;
+  bottom: calc(var(--gb-dock-h, 0px) + 22px);
   border-top: 2px solid #cbd5e1;
 }
 .gb-stats-foot tr:last-child td {
-  bottom: 0;
+  bottom: var(--gb-dock-h, 0px);
   border-top: 1px solid #e5e7eb;
 }
 .gb-stats-foot td.sticky-col,
@@ -350,10 +352,19 @@ input[type="number"] {
   display: none;
 }
 
-/* Missing-score highlight toggle: one root class silences the amber cell
-   tint; the missing-work chips and footer counts are unaffected. */
+/* Missing-score highlight toggle — ONE toggle, ONE visual system (v1.7.1):
+   the cell tint and the name chips disappear entirely; count surfaces
+   (stats footer, selection pill) keep their numbers but drop the amber
+   urgency — the data stays, the shouting stops. */
 .gb-hide-missing .missing-score {
   background: #ffffff !important;
+}
+.gb-hide-missing .gb-missing-chip {
+  display: none;
+}
+.gb-hide-missing .gb-missing-cue {
+  color: #94a3b8 !important;
+  font-weight: 400 !important;
 }
 
 /* Student-focus drawer (Phase 3b): slides in on the house 150ms motion. */

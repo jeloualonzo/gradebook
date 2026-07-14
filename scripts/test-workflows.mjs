@@ -229,5 +229,53 @@ check('F6: their scores are tombstoned with them', Object.keys(await scoresOf(R6
 check('F6: the group itself is untouched',
   (await must('GET', `/api/groups/${g6.id}/students`)).length === 2);
 
+// ============ Feature 7: retroactive counts-as-attendance (v1.7.1) ============
+// Enabling the flag AFTER scores exist processes them exactly as if it had
+// always been on: blanks-only, never overwrites, creates the date column.
+const R7 = await mkSubject('Retro Att');
+const r7s = [];
+for (const [l, f] of [['Uno', 'A'], ['Dos', 'B'], ['Tres', 'C']]) {
+  r7s.push((await must('POST', `/api/subjects/${R7}/students`, { last_name: l, first_name: f })).id);
+}
+const r7Prelim = (await must('GET', `/api/subjects/${R7}/periods`)).find(p => p.type === 'PRELIM');
+const r7Quiz = r7Prelim.assessments.find(a => a.name === 'Quiz');
+const r7Att = r7Prelim.assessments.find(a => a.name === 'Attendance');
+const r7Col = (await must('POST', `/api/assessments/${r7Quiz.id}/columns`, { date: '2026-08-10', max_score: 10 })).id;
+// Pre-set Dos LATE for that date; Uno and Tres score the quiz; Tres pre-scores too.
+const r7AttCol = (await must('POST', `/api/assessments/${r7Att.id}/columns`, { date: '2026-08-10', max_score: 10, dedupe_by_date: true })).id;
+await must('PUT', `/api/scores/${r7AttCol}/${r7s[1]}`, { value: 8 });
+await must('PUT', `/api/scores/${r7Col}/${r7s[0]}`, { value: 7 });
+await must('PUT', `/api/scores/${r7Col}/${r7s[1]}`, { value: 6 });
+const retro = await must('PUT', `/api/columns/${r7Col}`, { attendance_source: 1 });
+check('F7: enabling the flag backfills existing scores (blanks only)',
+  retro.attendance_backfilled === 1, `backfilled=${retro.attendance_backfilled}`);
+const r7After = await scoresOf(R7);
+check('F7: scored blank student marked Present; pre-set LATE untouched; unscored stays blank',
+  cell(r7After, r7AttCol, r7s[0]) === 10 && cell(r7After, r7AttCol, r7s[1]) === 8 &&
+  cell(r7After, r7AttCol, r7s[2]) === undefined);
+const off = await must('PUT', `/api/columns/${r7Col}`, { attendance_source: 0 });
+check('F7: disabling is inert — no backfill, nothing removed',
+  off.attendance_backfilled === 0 && cell(await scoresOf(R7), r7AttCol, r7s[0]) === 10);
+const reOn = await must('PUT', `/api/columns/${r7Col}`, { attendance_source: 1 });
+check('F7: re-enabling backfills nothing new (attendance already present)',
+  reOn.attendance_backfilled === 0);
+
+// ============ Feature 8: students-batch remove/revive (session history) ============
+const dryBefore = await must('GET', `/api/subjects/${R7}/students`);
+const rem = await must('POST', `/api/subjects/${R7}/students-batch`, { action: 'remove', student_ids: [r7s[0], r7s[1]] });
+check('F8: batch remove tombstones exactly the given students',
+  rem.changed === 2 && (await must('GET', `/api/subjects/${R7}/students`)).length === dryBefore.length - 2);
+check('F8: their scores went with them', cell(await scoresOf(R7), r7Col, r7s[0]) === undefined);
+const rev = await must('POST', `/api/subjects/${R7}/students-batch`, { action: 'revive', student_ids: [r7s[0], r7s[1]] });
+const revScores = await scoresOf(R7);
+check('F8: revive restores the SAME students with their scores',
+  rev.changed === 2 && (await must('GET', `/api/subjects/${R7}/students`)).length === dryBefore.length &&
+  cell(revScores, r7Col, r7s[0]) === 7 && cell(revScores, r7AttCol, r7s[1]) === 8);
+check('F8: revive is idempotent (already-active rows skip)',
+  (await must('POST', `/api/subjects/${R7}/students-batch`, { action: 'revive', student_ids: [r7s[0]] })).changed === 0);
+const imp8 = await must('POST', `/api/subjects/${R7}/import-students`, { groupId: g6.id, skipDuplicates: false });
+check('F8: group import returns the created ids (undoability contract)',
+  Array.isArray(imp8.created_ids) && imp8.created_ids.length === imp8.imported && imp8.imported === 2);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL WORKFLOW TESTS PASSED');
 process.exit(failures ? 1 : 0);

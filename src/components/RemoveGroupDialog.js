@@ -10,7 +10,7 @@ import Modal from './Modal';
  * exactly how many students match before anything is touched; removal
  * tombstones them (with their scores) through the normal delete path.
  */
-export default function RemoveGroupDialog({ subjectId, onClose, onRemoved }) {
+export default function RemoveGroupDialog({ subjectId, onClose, onRemoved, onHistoryPush, onHistoryRefresh }) {
   const [groups, setGroups] = useState([]);
   const [groupId, setGroupId] = useState('');
   const [preview, setPreview] = useState(null); // { matched, roster }
@@ -70,6 +70,22 @@ export default function RemoveGroupDialog({ subjectId, onClose, onRemoved }) {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Could not remove the students');
+      // Session history (v1.7.1): undo revives exactly the removed rows
+      // (students + their scores, matched-timestamp rule); redo re-removes.
+      if (onHistoryPush && d.removed_ids?.length) {
+        const ids = d.removed_ids;
+        const groupName = groups.find(g => String(g.id) === String(groupId))?.name || 'group';
+        const batch = (action) => fetch(`/api/subjects/${subjectId}/students-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, student_ids: ids }),
+        });
+        onHistoryPush({
+          label: `remove ${ids.length} student${ids.length === 1 ? '' : 's'} imported from "${groupName}"`,
+          undo: async () => { await batch('revive'); onHistoryRefresh?.(); },
+          redo: async () => { await batch('remove'); onHistoryRefresh?.(); },
+        });
+      }
       onRemoved(d.removed);
     } catch (err) {
       setError(err.message);

@@ -201,6 +201,23 @@ export default function GradebookPage() {
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error('Could not save the student.');
+      const target = editStudentTarget;
+      const before = {
+        last_name: target.last_name,
+        first_name: target.first_name,
+        middle_name: target.middle_name || '',
+        suffix: target.suffix || '',
+      };
+      const putStudent = (fields) => fetch(`/api/students/${target.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      });
+      history.push({
+        label: `edit student "${before.last_name}, ${before.first_name}"`,
+        undo: async () => { await putStudent(before); refreshStudents(); },
+        redo: async () => { await putStudent(form); refreshStudents(); },
+      });
       setEditStudentTarget(null);
       showToast('Student updated');
       refreshStudents();
@@ -217,6 +234,18 @@ export default function GradebookPage() {
     if (!target) return;
     const res = await fetch(`/api/students/${target.id}`, { method: 'DELETE' });
     if (res.ok) {
+      // Session history (v1.7.1): a grid-side delete is undoable — revive
+      // brings back the student AND the scores tombstoned with them.
+      const batch = (action) => fetch(`/api/subjects/${id}/students-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, student_ids: [target.id] }),
+      });
+      history.push({
+        label: `delete student "${target.last_name}, ${target.first_name}"`,
+        undo: async () => { await batch('revive'); refreshStudents(); refreshScores(); },
+        redo: async () => { await batch('remove'); refreshStudents(); refreshScores(); },
+      });
       showToast(`${target.last_name}, ${target.first_name} removed`);
       refreshStudents();
       refreshScores();
@@ -395,6 +424,7 @@ export default function GradebookPage() {
           showMissingHighlight={showMissingHighlight}
           rosterNumbers={rosterNumbers}
           onFocusColumn={setFocusColumn}
+          onNotify={showToast}
           onVisiblePeriodChange={setVisiblePeriod}
           onUpdateScore={updateScore}
           onBulkUpdate={bulkUpdateScores}
@@ -427,6 +457,7 @@ export default function GradebookPage() {
           subjectId={id}
           students={students}
           onRefresh={() => { refreshStudents(); refreshScores(); }}
+          onHistoryPush={history.push}
         />
       </Modal>
 
@@ -453,11 +484,14 @@ export default function GradebookPage() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         subjectId={id}
-        onImported={({ imported, skipped }) => {
-          showToast(
-            `Imported ${imported} student${imported !== 1 ? 's' : ''}` +
-            (skipped ? ` (${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped)` : '')
-          );
+        onHistoryPush={history.push}
+        onImported={({ imported, skipped, refreshOnly }) => {
+          if (!refreshOnly) {
+            showToast(
+              `Imported ${imported} student${imported !== 1 ? 's' : ''}` +
+              (skipped ? ` (${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped)` : '')
+            );
+          }
           refreshStudents();
           refreshScores();
         }}
@@ -468,6 +502,8 @@ export default function GradebookPage() {
       {removeGroupOpen && (
         <RemoveGroupDialog
           subjectId={id}
+          onHistoryPush={history.push}
+          onHistoryRefresh={() => { refreshStudents(); refreshScores(); }}
           onClose={() => setRemoveGroupOpen(false)}
           onRemoved={(n) => {
             setRemoveGroupOpen(false);

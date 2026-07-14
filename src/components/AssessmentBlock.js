@@ -3,7 +3,7 @@ import { useState, useRef, memo } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 import MoveColumnDialog from './MoveColumnDialog';
 import { formatNumber, toCents, centsToNumber } from '@/lib/gradeCalculator';
-import { toDateInputValue, formatDateMMDDYYYY } from '@/lib/dateUtils';
+import { toDateInputValue, formatDateMMDDYYYY, formatDateLong } from '@/lib/dateUtils';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -52,6 +52,7 @@ function AssessmentBlock({
   onSaveError,
   onOpenMenu,
   onFocusColumn,
+  onNotify,
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
@@ -100,6 +101,7 @@ function AssessmentBlock({
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error('Save failed');
+    return res.json().catch(() => ({}));
   };
 
   const postColumn = async (body) => {
@@ -461,15 +463,25 @@ function AssessmentBlock({
     const next = col.attendance_source ? 0 : 1;
     const apply = (v) => onPatchColumn(col.id, { attendance_source: v });
     apply(next); // instant UI
+    let saved;
     try {
-      await putColumn(col.id, { attendance_source: next });
+      saved = await putColumn(col.id, { attendance_source: next });
     } catch {
       apply(col.attendance_source ? 1 : 0);
       onSaveError?.('Could not save the attendance setting — value restored.');
       return;
     }
+    // Retroactive backfill (v1.7.1): enabling the flag processed the
+    // column's EXISTING scores server-side — surface what happened and pull
+    // the fresh attendance rows into the grid.
+    if (next && saved?.attendance_backfilled > 0) {
+      onNotify?.(`Marked ${saved.attendance_backfilled} student${saved.attendance_backfilled === 1 ? '' : 's'} Present for ${formatDateLong(col.date)}`);
+      onRefreshData?.();
+    }
     onHistoryPush?.({
       label: next ? 'count date as attendance' : 'stop counting date as attendance',
+      // Undoing the toggle flips the FLAG only — attendance already written
+      // (manual or backfilled) persists, per the add-only mirroring rule.
       undo: async () => { apply(next ? 0 : 1); await putColumn(col.id, { attendance_source: next ? 0 : 1 }); },
       redo: async () => { apply(next); await putColumn(col.id, { attendance_source: next }); },
     });

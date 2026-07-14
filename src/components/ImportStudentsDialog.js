@@ -8,7 +8,7 @@ import Modal from './Modal';
  * untouched. Optionally skips students whose full name (First + Middle +
  * Last) already exists in the subject.
  */
-export default function ImportStudentsDialog({ open, onClose, subjectId, onImported }) {
+export default function ImportStudentsDialog({ open, onClose, subjectId, onImported, onHistoryPush }) {
   const [groups, setGroups] = useState([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [groupId, setGroupId] = useState('');
@@ -49,6 +49,23 @@ export default function ImportStudentsDialog({ open, onClose, subjectId, onImpor
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Import failed');
+      // Session history (v1.7.1): undo tombstones exactly the students this
+      // import created; redo REVIVES the same rows — stable ids across the
+      // whole undo/redo cycle, nothing for sync to churn on.
+      if (onHistoryPush && result.created_ids?.length) {
+        const ids = result.created_ids;
+        const groupName = selectedGroup?.name || 'group';
+        const batch = (action) => fetch(`/api/subjects/${subjectId}/students-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, student_ids: ids }),
+        });
+        onHistoryPush({
+          label: `import ${ids.length} student${ids.length === 1 ? '' : 's'} from "${groupName}"`,
+          undo: async () => { await batch('remove'); onImported?.({ refreshOnly: true }); },
+          redo: async () => { await batch('revive'); onImported?.({ refreshOnly: true }); },
+        });
+      }
       onImported?.(result);
       onClose();
     } catch (err) {

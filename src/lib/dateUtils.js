@@ -32,6 +32,19 @@ export function formatDateMMDDYYYY(dateVal) {
   return `${m}/${d}/${y}`;
 }
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * 'YYYY-MM-DD' → 'July 8, 2026' — parsed by string parts, never new Date()
+ * (see the module comment: date-only values must not shift across timezones).
+ */
+export function formatDateLong(dateVal) {
+  const iso = toDateInputValue(dateVal);
+  if (!iso) return '--';
+  const [y, m, d] = iso.split('-');
+  return `${MONTH_NAMES[+m - 1]} ${+d}, ${+y}`;
+}
+
 /**
  * Human relative time for TIMESTAMPS (full ISO datetimes — sync stamps,
  * peer last-seen). Not for calendar dates; those stay string-based above.

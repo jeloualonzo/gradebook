@@ -185,6 +185,15 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- Fixes & edge cases (v1.7.1, first SemVer patch): the THREE-LEVEL recovery
+  model — cell editing always undoable; gradebook structure undoable
+  wherever possible (imports, roster edits, removals — batch remove/revive
+  cycles the SAME rows); outside-the-gradebook stays with its own systems
+  (recycle bin, conflict review). Retroactive counts-as-attendance
+  (enabling backfills existing scores through the same blanks-only hook;
+  disabling stays inert). Dock-aware layout (in-flow spacer + the stats
+  footer pins above the scrollbar dock). One toggle, one visual system for
+  missing cues. Semantic Versioning adopted and documented in AGENTS.md §9
 - Polish batch (v1.7.0): context-menu row highlight; native-proportional
   sticky-scrollbar thumb with the container's own bar hidden; wheel-proof
   number inputs (owner chose keeping numeric semantics over text inputs —

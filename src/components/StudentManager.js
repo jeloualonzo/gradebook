@@ -8,7 +8,15 @@ import { useHotkey } from '@/lib/hooks/useHotkey';
 import ConfirmDialog from './ConfirmDialog';
 import StudentForm from './StudentForm';
 
-export default function StudentManager({ subjectId, students, onRefresh }) {
+export default function StudentManager({ subjectId, students, onRefresh, onHistoryPush }) {
+  // Session history (v1.7.1): roster edits are undoable like everything
+  // else inside the gradebook. Removal/revival go through the batch
+  // endpoint so undo/redo cycle over THE SAME rows (stable ids).
+  const batchStudents = (action, ids) => fetch(`/api/subjects/${subjectId}/students-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, student_ids: ids }),
+  });
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState(null); // for the optional add-to-group picker
   const [editTarget, setEditTarget] = useState(null);
@@ -67,11 +75,19 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
   const handleAdd = async (form) => {
     setLoading(true);
     const { add_to_group_id, ...student } = form;
-    await fetch(`/api/subjects/${subjectId}/students`, {
+    const addRes = await fetch(`/api/subjects/${subjectId}/students`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(student),
     });
+    const added = await addRes.json().catch(() => null);
+    if (addRes.ok && added?.id && onHistoryPush) {
+      onHistoryPush({
+        label: `add student "${student.last_name}, ${student.first_name}"`,
+        undo: async () => { await batchStudents('remove', [added.id]); onRefresh(); },
+        redo: async () => { await batchStudents('revive', [added.id]); onRefresh(); },
+      });
+    }
     // Optional second half of the one-step workflow: mirror into a group
     // (the group's own duplicate check keeps this safe).
     if (add_to_group_id) {
@@ -88,10 +104,23 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
 
   const handleEdit = async (form) => {
     setLoading(true);
-    await fetch(`/api/students/${editTarget.id}`, {
+    const target = editTarget;
+    const before = {
+      last_name: target.last_name,
+      first_name: target.first_name,
+      middle_name: target.middle_name || '',
+      suffix: target.suffix || '',
+    };
+    const putStudent = (fields) => fetch(`/api/students/${target.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(fields),
+    });
+    await putStudent(form);
+    onHistoryPush?.({
+      label: `edit student "${before.last_name}, ${before.first_name}"`,
+      undo: async () => { await putStudent(before); onRefresh(); },
+      redo: async () => { await putStudent(form); onRefresh(); },
     });
     setLoading(false);
     setEditTarget(null);
@@ -99,7 +128,13 @@ export default function StudentManager({ subjectId, students, onRefresh }) {
   };
 
   const handleDelete = async () => {
-    await fetch(`/api/students/${deleteTarget.id}`, { method: 'DELETE' });
+    const target = deleteTarget;
+    await fetch(`/api/students/${target.id}`, { method: 'DELETE' });
+    onHistoryPush?.({
+      label: `delete student "${target.last_name}, ${target.first_name}"`,
+      undo: async () => { await batchStudents('revive', [target.id]); onRefresh(); },
+      redo: async () => { await batchStudents('remove', [target.id]); onRefresh(); },
+    });
     setDeleteTarget(null);
     onRefresh();
   };

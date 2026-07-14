@@ -720,7 +720,7 @@ export default function GridSelectionLayer({
               <span>Low {formatNumber(stats.low)}</span>
             </>
           )}
-          {stats.missing > 0 && <span className="text-amber-600">{stats.missing} missing</span>}
+          {stats.missing > 0 && <span className="text-amber-600 gb-missing-cue">{stats.missing} missing</span>}
         </div>
       )}
     </>
