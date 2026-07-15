@@ -106,6 +106,25 @@ export function fillExtendPlan(src, ext) {
   return plan;
 }
 
+/**
+ * Native scrollbar metrics for the dock's custom-drawn thumb (v1.7.2).
+ * Exactly Windows' arithmetic: thumb size = track × (viewport ÷ content),
+ * clamped to a native-like minimum; thumb travel maps linearly onto the
+ * scrollable range. Drawing our own thumb (instead of proxying a real
+ * scrollbar through spacer tricks) makes the pill pixel-clean and immune
+ * to platform scrollbar styling. Pure — fixtures pin the arithmetic.
+ */
+export function scrollThumbMetrics(clientW, scrollW, trackW, scrollLeft = 0) {
+  if (!(scrollW > clientW) || trackW <= 0 || clientW <= 0) {
+    return { scrollable: false, size: trackW, offset: 0, maxOffset: 0, maxScroll: 0 };
+  }
+  const size = Math.min(trackW, Math.max(24, Math.round(trackW * (clientW / scrollW))));
+  const maxOffset = trackW - size;
+  const maxScroll = scrollW - clientW;
+  const offset = Math.round(maxOffset * Math.min(1, Math.max(0, scrollLeft / maxScroll)));
+  return { scrollable: true, size, offset, maxOffset, maxScroll };
+}
+
 export function createSelectionModel() {
   let geometry = { rows: [], cols: [] };
   let geometrySignature = '';

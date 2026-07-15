@@ -367,6 +367,43 @@ input[type="number"] {
   font-weight: 400 !important;
 }
 
+/* Dock scrollbar (v1.7.2): a custom-drawn track + thumb with native
+   arithmetic (scrollThumbMetrics) — pixel-clean inside the pill, no
+   platform scrollbar styling, no spacer tricks. */
+.gb-dock-track {
+  position: relative;
+  height: 14px;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+.gb-dock-thumb {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: #b6bec9;
+  cursor: grab;
+  transition: background-color 120ms ease;
+  will-change: transform;
+}
+.gb-dock-thumb:hover { background: #94a3b8; }
+.gb-dock-thumb:active { background: #7c8798; cursor: grabbing; }
+
+/* Two-mode cells (v1.7.2): a filled READY cell hit by a stray key flashes
+   "locked" instead of losing data — edit is F2 / double-click / Delete. */
+@keyframes gb-locked {
+  0%, 100% { background-color: #ffffff; }
+  45% { background-color: #dbe3ee; }
+}
+.score-cell.gb-cell-locked {
+  animation: gb-locked 300ms ease;
+}
+/* READY mode hides the caret entirely — the cell reads as selected, not
+   as a text field waiting to eat keystrokes. */
+input[data-cell="score"][readonly] {
+  caret-color: transparent;
+  cursor: default;
+}
+
 /* Student-focus drawer (Phase 3b): slides in on the house 150ms motion. */
 @keyframes gb-drawer {
   from { opacity: 0; transform: translateX(16px); }

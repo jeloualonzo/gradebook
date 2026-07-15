@@ -185,6 +185,14 @@ full understanding. Preferences, consistently demonstrated:
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- Data-safety patch (v1.7.2): TWO-MODE score cells — ready (readOnly,
+  nothing selected, stray keys harmless; empty cells still type-to-enter
+  so entry speed is untouched) vs intentional edit (double-click / F2 /
+  Delete); filled cells flash "locked" on stray keys. The dock scrollbar
+  became a custom-drawn track + thumb with fixture-tested native
+  arithmetic (draggable, page-on-click, wheel) — the proxied-scrollbar
+  spacer trick and its visual artifacts are gone. Focus modal overflow
+  cleaned (fixed table layout)
 - Fixes & edge cases (v1.7.1, first SemVer patch): the THREE-LEVEL recovery
   model — cell editing always undoable; gradebook structure undoable
   wherever possible (imports, roster edits, removals — batch remove/revive

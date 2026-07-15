@@ -45,16 +45,23 @@ export default function AssessmentFocusModal({
           {stats.missing > 0 && <span className="ml-2 text-amber-600">{stats.missing} missing</span>}
         </span>
       </div>
+      {/* overflow-hidden + fixed layout: the modal never grows a stray
+          horizontal scrollbar; the name column absorbs the slack. */}
       <div data-grid-scope className="gradebook-table border border-gray-200 rounded overflow-hidden">
-        <table className="w-full text-xs gradebook-table">
+        <table className="w-full text-xs gradebook-table table-fixed">
+          <colgroup>
+            <col style={{ width: '34px' }} />
+            <col />
+            <col style={{ width: '76px' }} />
+          </colgroup>
           <tbody>
             {students.map((student, idx) => (
               <tr key={student.id} data-student-row={student.id}>
                 <td className="w-8 text-center text-gray-400 py-1 bg-white">
                   {rosterNumbers?.get(String(student.id)) ?? idx + 1}
                 </td>
-                <td className="px-3 py-1 font-medium text-gray-800 bg-white">
-                  <span className="truncate block max-w-[230px]">{displayName(student)}</span>
+                <td className="px-3 py-1 font-medium text-gray-800 bg-white overflow-hidden">
+                  <span className="truncate block">{displayName(student)}</span>
                 </td>
                 <td className="w-20 p-0">
                   <ScoreCell

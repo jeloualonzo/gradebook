@@ -19,6 +19,16 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
   const [value, setValue] = useState(initialValue !== undefined && initialValue !== null ? formatNumber(initialValue) : '');
   const save = useAutosave();
   const inputRef = useRef(null);
+  // Two-mode cell (v1.7.2 — accidental-overwrite protection). READY mode:
+  // the input is readOnly — focused, navigable, nothing selected, no caret;
+  // stray keystrokes cannot destroy a grade. EDIT mode is INTENTIONAL:
+  // double-click, F2, Delete/Backspace, or typing into an EMPTY cell (the
+  // fast-entry cadence — type 8, Enter, type 7 — is unchanged, because
+  // empty cells have nothing to lose). Excel/Sheets replace-on-type is
+  // exactly the behavior that loses data; this keeps their speed without it.
+  const [editing, setEditing] = useState(false);
+  const editingRef = useRef(false);
+  useEffect(() => { editingRef.current = editing; });
   // Value captured when the cell gains focus — used to record ONE undo entry
   // per edit session (like committing a cell in Excel), not one per keystroke.
   const focusValueRef = useRef(undefined);
@@ -28,8 +38,9 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
   useEffect(() => { valueRef.current = value; });
 
   // Sync from external changes (undo/redo, import, refresh) while not editing.
+  // A focused-but-READY cell must still reflect them (only a live edit wins).
   useEffect(() => {
-    if (document.activeElement === inputRef.current) return;
+    if (document.activeElement === inputRef.current && editingRef.current) return;
     const v = initialValue !== undefined && initialValue !== null ? formatNumber(initialValue) : '';
     if (valueRef.current !== v) {
       lastSavedRef.current = v; // external change reflects server truth
@@ -78,13 +89,37 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
     scheduleSave(v);
   };
 
-  const handleFocus = (e) => {
+  const handleFocus = () => {
     focusValueRef.current = value;
-    // Spreadsheet-style: selecting a cell selects its content (type to replace).
-    e.target.select();
+    // READY mode on arrival: nothing selected, nothing at risk.
+  };
+
+  /** Enter EDIT mode deliberately. Explicit entry selects the content (the
+      user CHOSE to replace); typing into an empty cell starts from the
+      typed character. */
+  const beginEdit = (initialChar) => {
+    setEditing(true);
+    if (initialChar !== undefined) {
+      setValue(initialChar);
+      scheduleSave(initialChar);
+    }
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      if (initialChar === undefined) el.select();
+    });
+  };
+
+  /** Filled + READY + stray key: flash "locked" instead of destroying data. */
+  const flashLocked = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.classList.add('gb-cell-locked');
+    setTimeout(() => el.classList.remove('gb-cell-locked'), 300);
   };
 
   const handleBlur = () => {
+    setEditing(false);
     const before = focusValueRef.current;
     focusValueRef.current = undefined;
     if (before === undefined || before === value) return;
@@ -110,8 +145,7 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
   // stays scoped to the gradebook because handlers live on the cells.
   const focusCell = (el) => {
     if (!el) return false;
-    el.focus();
-    el.select?.();
+    el.focus(); // arriving = READY mode; nothing gets selected
     return true;
   };
   // Queries stay inside the current GRID SCOPE ([data-grid-scope]) so the
@@ -135,6 +169,29 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
     // Never shadow Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z or browser shortcuts.
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target;
+
+    // F2 on a SCORE cell edits the cell (true Excel). Assessment renaming
+    // keeps F2 on the header cells (date/max), where it always lived.
+    if (e.key === 'F2' && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!editing) beginEdit();
+      return;
+    }
+
+    // READY mode: a printable score character starts an edit only where
+    // nothing can be lost. Filled cells flash "locked" — edit is F2 /
+    // double-click / Delete, always intentional.
+    if (!editing && /^[0-9.]$/.test(e.key)) {
+      e.preventDefault();
+      if (isEmpty) beginEdit(e.key);
+      else flashLocked();
+      return;
+    }
+
+    // While EDITING, ←/→ move the caret (don't navigate); ↑/↓/Enter/Tab
+    // commit-and-navigate as always; Escape reverts below.
+    if (editing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
 
     switch (e.key) {
       case 'ArrowDown': {
@@ -170,7 +227,7 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
       case 'Escape': {
         // Cancel the edit: restore the value from when the cell was entered —
         // in the UI, the shared scores map, AND the background save — then
-        // exit edit mode. No history entry is recorded (blur sees no change).
+        // return to READY without losing the selection (Excel stays put).
         e.preventDefault();
         const before = focusValueRef.current;
         if (before !== undefined && before !== value) {
@@ -178,11 +235,14 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
           onUpdate(columnId, studentId, before === '' ? null : before);
           scheduleSave(before);
         }
-        requestAnimationFrame(() => t.blur());
+        setEditing(false);
         break;
       }
-      case 'Delete': {
+      case 'Delete':
+      case 'Backspace': {
         // Clear the cell's value (never the column) and keep the selection.
+        // Explicitly destructive — and one Ctrl+Z away, like everything else.
+        if (editing) break; // mid-edit, Backspace edits text natively
         e.preventDefault();
         setValue('');
         onUpdate(columnId, studentId, null);
@@ -225,10 +285,12 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
       max={maxScore}
       step="0.01"
       value={value}
+      readOnly={!editing}
       onChange={handleChange}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
+      onDoubleClick={() => { if (!editing) beginEdit(); }}
       data-cell="score"
       data-col={columnId}
       className={`score-cell w-full text-center text-xs py-1.5 border-0 focus:bg-blue-50 transition-colors ${

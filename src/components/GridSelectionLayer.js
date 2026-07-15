@@ -541,7 +541,7 @@ export default function GridSelectionLayer({
           const el = grid.querySelector(
             `tr[data-student-row="${g.rows[target.r]}"] input[data-col="${g.cols[target.c].columnId}"]`
           );
-          if (el) { el.focus(); el.select?.(); }
+          el?.focus(); // arriving = READY mode
         }
         return;
       }
@@ -574,23 +574,31 @@ export default function GridSelectionLayer({
     // the input's native copy/cut/paste (text within the cell). Native
     // events carry clipboardData with zero permission prompts, in Electron
     // and browser dev alike.
+    // Dispatch rule (v1.7.2, two-mode cells): the grid owns the clipboard
+    // whenever the cell is in READY mode (readOnly) or a range is active;
+    // only a cell being EDITED keeps native text-field behavior.
+    const cellIsEditing = (e) => {
+      const input = e.target?.closest?.('input[data-cell="score"]');
+      return !!input && !input.readOnly;
+    };
     const onCopy = (e) => {
-      if (!model.isMulti()) return;
+      if (cellIsEditing(e) && !model.isMulti()) return;
+      if (!model.rect()) return;
       e.preventDefault();
       copySelection(e.clipboardData, false);
     };
     const onCut = (e) => {
-      if (!model.isMulti()) return;
+      if (cellIsEditing(e) && !model.isMulti()) return;
+      if (!model.rect()) return;
       e.preventDefault();
       copySelection(e.clipboardData, true); // source clears when the paste lands
     };
     const onPaste = (e) => {
       const onScoreCell = !!e.target?.closest?.('input[data-cell="score"]');
       if (!onScoreCell) return;
+      if (cellIsEditing(e) && !model.isMulti()) return; // native mid-edit paste
       const data = parseClipboardText(e.clipboardData?.getData('text/plain') || '');
       if (!data) return;
-      // Scalar into a single cell = the input's own paste (autosave flows).
-      if (!model.isMulti() && data.length === 1 && data[0].length === 1 && !clipRef.current?.cut) return;
       e.preventDefault();
       runPaste(data);
     };

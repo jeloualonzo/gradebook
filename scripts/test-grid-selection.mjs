@@ -8,7 +8,7 @@
  * The imperative shell (overlays, pointer events) stays deliberately thin;
  * everything decision-shaped lives here where plain Node can test it.
  */
-import { createSelectionModel, normalizeRect, computeSelectionStats, fillDownPlan, fillExtendPlan } from '../src/lib/gridSelection.js';
+import { createSelectionModel, normalizeRect, computeSelectionStats, fillDownPlan, fillExtendPlan, scrollThumbMetrics } from '../src/lib/gridSelection.js';
 import { serializeRange, parseClipboardText, normalizeToken, resolvePaste } from '../src/lib/tsv.js';
 
 let failures = 0;
@@ -188,6 +188,20 @@ t('normalize: reversed anchors produce the same rectangle',
   t('drag fill: rightward extension cycles the source columns',
     extR.map(p => p.srcC).join(',') === '0,1,0' && extR.map(p => p.dstC).join(',') === '2,3,4');
   t('drag fill: null inputs yield an empty plan', fillExtendPlan(null, null).length === 0);
+}
+
+// ---- dock scrollbar thumb metrics (v1.7.2) ---------------------------------------
+{
+  const half = scrollThumbMetrics(500, 1000, 400, 0);
+  t('thumb: size is track × viewport/content', half.size === 200 && half.offset === 0);
+  const end = scrollThumbMetrics(500, 1000, 400, 500);
+  t('thumb: fully scrolled reaches the track end exactly', end.offset === end.maxOffset && end.offset === 200);
+  const mid = scrollThumbMetrics(500, 1000, 400, 250);
+  t('thumb: travel maps linearly', mid.offset === 100);
+  t('thumb: clamps to a native-like minimum on huge content',
+    scrollThumbMetrics(500, 50000, 400, 0).size === 24);
+  t('thumb: no overflow → not scrollable, thumb fills the track',
+    scrollThumbMetrics(1000, 900, 400).scrollable === false && scrollThumbMetrics(1000, 900, 400).size === 400);
 }
 
 console.log(failures === 0 ? '\nALL GRID SELECTION TESTS PASSED' : `\n${failures} FAILURES`);

@@ -292,7 +292,7 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 | Suite | What it proves | How |
 |---|---|---|
 | `test-sync-engine.mjs` (50) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) | Fixtures, no I/O |
-| `test-grid-selection.mjs` (42) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (round-trips, Excel quirks, tile/block/clip shapes, token rules) + fill plans (Ctrl+D top-row-repeats, single-cell copy-above, drag-fill tiling) | Fixtures, no I/O |
+| `test-grid-selection.mjs` (47) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (round-trips, Excel quirks, tile/block/clip shapes, token rules) + fill plans + dock scrollbar thumb metrics (native arithmetic, min clamp, endpoint mapping) | Fixtures, no I/O |
 | `test-sync-scenarios.mjs` (60) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-class-stats.mjs` (25) | Period-closing semantics (active-column rule, fill-blanks scopes, footer math, thresholds, ranking) + term sequencing (rollover defaults) + the student-focus model (P/L/A letters via config, missing list, grade agreement with the calculator) | Fixtures, no I/O |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
@@ -432,6 +432,20 @@ the remote blob SHA against local `git hash-object`.
   Deliberately deferred there: printable slip (print pack), student notes
   (synced data — needs the schema + snapshot discussion), per-cell history
   (the app stores none by design).
+- TWO-MODE CELLS (v1.7.2 — the accidental-overwrite fix). Score cells are
+  READY by default: readOnly, focused, navigable, caret hidden, nothing
+  selected — stray keystrokes cannot destroy a grade (Excel/Sheets
+  replace-on-type is exactly the behavior that loses data). EDIT is
+  intentional: double-click, F2 (score cells now edit the CELL — assessment
+  rename keeps F2 on the header cells), Delete/Backspace (clear, undoable),
+  or typing into an EMPTY cell — so the entry cadence (type 8 · Enter ·
+  type 7) is unchanged; a filled cell hit by a stray key flashes "locked".
+  Editing: ←/→ move the caret, ↑/↓/Enter/Tab commit-and-navigate, Esc
+  reverts and stays put. Clipboard dispatch: the grid owns copy/cut/paste
+  whenever the cell is READY or a range is active; only a cell being
+  EDITED keeps native text behavior. The dock scrollbar is a custom-drawn
+  track + thumb (scrollThumbMetrics, fixture-tested) — draggable,
+  page-on-track-click, wheel-forwarding; never a proxied native scrollbar.
 - Polish v1.7.0, the load-bearing details: the right-clicked row stays
   slate-tinted while its menu is open (gb-menu-row, imperative); the sticky
   proxy scrollbar's thumb is native-proportional (spacer = track ×

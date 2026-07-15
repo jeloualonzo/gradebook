@@ -7,6 +7,7 @@ import FindStudentBar from './FindStudentBar';
 import GridSelectionLayer from './GridSelectionLayer';
 import ConfirmDialog from './ConfirmDialog';
 import { missingCounts, columnStats, blankEntries } from '@/lib/classStats';
+import { scrollThumbMetrics } from '@/lib/gridSelection';
 import { formatGrade, formatNumber, toCents, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
@@ -195,27 +196,70 @@ export default function GradebookTable({
     window.localStorage.setItem(NAME_WIDTH_KEY, String(w));
   };
 
-  // --- Sticky horizontal scrollbar (proxy synced with the grid) --------------
-  const proxyRef = useRef(null);
-  const syncingScroll = useRef(false);
-  const [proxyState, setProxyState] = useState({ w: 0, visible: false });
+  // --- Sticky horizontal scrollbar (custom-drawn thumb, v1.7.2) --------------
+  // The dock draws its OWN track + thumb from native arithmetic
+  // (scrollThumbMetrics — fixture-tested) instead of proxying a real
+  // scrollbar: pixel-clean inside the pill, exactly proportional, no
+  // platform scrollbar styling to fight. Updates are imperative — scrolling
+  // never re-renders the grid.
+  const trackRef = useRef(null);
+  const thumbRef = useRef(null);
+  const [proxyState, setProxyState] = useState({ visible: false });
+  const updateThumb = useCallback(() => {
+    const grid = gridRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!grid || !track || !thumb) return;
+    const m = scrollThumbMetrics(grid.clientWidth, grid.scrollWidth, track.clientWidth, grid.scrollLeft);
+    thumb.style.width = `${m.size}px`;
+    thumb.style.transform = `translateX(${m.offset}px)`;
+  }, []);
   useEffect(() => {
     const grid = gridRef.current;
     if (!grid) return;
     const ro = new ResizeObserver(() => {
-      // Native-proportional thumb (v1.7.0): a scrollbar thumb's size is
-      // track × (viewport ÷ content). The proxy is a REAL scrollbar, so we
-      // get that ratio by sizing its inner spacer to
-      // track × (content ÷ viewport) — the thumb then represents exactly
-      // what a native Windows scrollbar would show.
-      const track = proxyRef.current?.clientWidth || STICKY_SCROLLBAR_WIDTH_PX;
-      const ratio = grid.clientWidth > 0 ? grid.scrollWidth / grid.clientWidth : 1;
-      setProxyState({ w: Math.round(track * ratio), visible: grid.scrollWidth > grid.clientWidth + 2 });
+      setProxyState({ visible: grid.scrollWidth > grid.clientWidth + 2 });
+      updateThumb();
     });
     ro.observe(grid);
     const table = grid.querySelector('table');
     if (table) ro.observe(table);
     return () => ro.disconnect();
+  }, [updateThumb]);
+  // The track mounts only when the dock appears — size the thumb then.
+  useEffect(() => { if (proxyState.visible) updateThumb(); }, [proxyState.visible, updateThumb]);
+
+  /** Drag the thumb — pointer capture, linear map back onto scrollLeft. */
+  const onThumbPointerDown = useCallback((e) => {
+    const grid = gridRef.current;
+    const track = trackRef.current;
+    if (!grid || !track) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startScroll = grid.scrollLeft;
+    const m = scrollThumbMetrics(grid.clientWidth, grid.scrollWidth, track.clientWidth, grid.scrollLeft);
+    if (!m.scrollable || m.maxOffset === 0) return;
+    const onMove = (ev) => {
+      grid.scrollLeft = startScroll + (ev.clientX - startX) * (m.maxScroll / m.maxOffset);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
+
+  /** Click the track (not the thumb): page toward the pointer — native behavior. */
+  const onTrackPointerDown = useCallback((e) => {
+    const grid = gridRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!grid || !track || !thumb || e.target === thumb) return;
+    const thumbBox = thumb.getBoundingClientRect();
+    const dir = e.clientX < thumbBox.left ? -1 : 1;
+    grid.scrollBy({ left: dir * grid.clientWidth * 0.8, behavior: 'smooth' });
   }, []);
   // --- Session restore + live period reporting (ROADMAP Phase 1) ------------
   // Both are scroll-derived: the horizontal position is persisted per subject
@@ -284,22 +328,8 @@ export default function GradebookTable({
 
   const onGridScroll = () => {
     scheduleScrollWork();
-    if (syncingScroll.current) { syncingScroll.current = false; return; }
-    const g = gridRef.current, p = proxyRef.current;
-    if (!g || !p) return;
-    const gMax = g.scrollWidth - g.clientWidth;
-    const pMax = p.scrollWidth - p.clientWidth;
-    if (gMax > 0 && pMax > 0) { syncingScroll.current = true; p.scrollLeft = (g.scrollLeft / gMax) * pMax; }
+    updateThumb();
   };
-  const onProxyScroll = () => {
-    if (syncingScroll.current) { syncingScroll.current = false; return; }
-    const g = gridRef.current, p = proxyRef.current;
-    if (!g || !p) return;
-    const gMax = g.scrollWidth - g.clientWidth;
-    const pMax = p.scrollWidth - p.clientWidth;
-    if (gMax > 0 && pMax > 0) { syncingScroll.current = true; g.scrollLeft = (p.scrollLeft / pMax) * gMax; }
-  };
-
   // One-click period navigation (the PRELIM/MIDTERM/FINAL buttons docked to
   // the sticky scrollbar): scroll the grid so the period's first column
   // lands just right of the sticky # + Name columns.
@@ -981,13 +1011,14 @@ export default function GradebookTable({
           ))}
         </div>
         <div
-          ref={proxyRef}
-          onScroll={onProxyScroll}
-          className="overflow-x-scroll overflow-y-hidden"
-          style={{ width: `min(${STICKY_SCROLLBAR_WIDTH_PX}px, calc(100vw - 16rem))`, height: '14px' }}
+          ref={trackRef}
+          onPointerDown={onTrackPointerDown}
+          onWheel={(e) => { e.preventDefault(); gridRef.current?.scrollBy({ left: e.deltaY + e.deltaX }); }}
+          className="gb-dock-track"
+          style={{ width: `min(${STICKY_SCROLLBAR_WIDTH_PX}px, calc(100vw - 16rem))` }}
           title="Scroll the gradebook horizontally"
         >
-          <div style={{ width: proxyState.w, height: 1 }} />
+          <div ref={thumbRef} onPointerDown={onThumbPointerDown} className="gb-dock-thumb" />
         </div>
       </div>
     )}
