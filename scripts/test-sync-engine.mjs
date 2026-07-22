@@ -282,5 +282,55 @@ const cellRow = (over = {}) => ({
     semanticallyEqual(SUBJECTS, subj({ owner_device_id: B, updated_at: T2 }), subj()));
 }
 
+// ---- 9. notes (snapshot v6 — the first SYNCED_TABLES change) ----------------
+{
+  const NOTES = SYNCED_TABLES.find(x => x.name === 'notes');
+  const T0 = '2026-07-01T00:00:00.000Z';
+  const T1 = '2026-07-02T00:00:00.000Z';
+  const note = (over = {}) => ({
+    id: 'n1', entity_type: 'cell', entity_id: 'col-1:stu-1', subject_id: 's1',
+    body: 'absent — makeup on Friday', created_at: T0, updated_at: T0, deleted_at: null, ...over,
+  });
+
+  t('notes: snapshot schema version bumped to 6 for the notes table', SCHEMA_VERSION === 6);
+  t('notes: registered with the entity natural key',
+    !!NOTES && NOTES.naturalKey.join('|') === 'entity_type|entity_id');
+  t('notes: natural key is entity_type + entity_id',
+    rowKey(NOTES, note()) === 'cell|col-1:stu-1');
+
+  {
+    // Both laptops annotate the SAME cell independently (different UUIDs):
+    // the natural key makes it one newest-wins row, never a duplicate.
+    const mine = note({ id: 'n-mine', body: 'sick, excused' });
+    const theirs = note({ id: 'n-theirs', body: 'makeup scheduled', updated_at: T1 });
+    const d = mergeTable(NOTES, [mine], [theirs], ctxOnA);
+    t('notes: independent notes on one cell converge by natural key (newer wins, id adopted)',
+      d.inserts.length === 0 && d.updates.length === 1 &&
+      d.updates[0].id === 'n-theirs' && d.updates[0].body === 'makeup scheduled');
+  }
+  {
+    // A deleted note arrives as a tombstone and wins over the older live one.
+    const live = note();
+    const deleted = note({ id: 'n-del', deleted_at: T1, updated_at: T1 });
+    const d = mergeTable(NOTES, [live], [deleted], ctxOnA);
+    t('notes: a deleted note propagates as a tombstone', d.updates.length === 1 && !!d.updates[0].deleted_at);
+  }
+  {
+    // Snapshots from the PREVIOUS app version carry no notes table at all —
+    // the merge treats it as empty and everything else still applies.
+    const r = mergeSnapshots({ notes: [note()] }, { subjects: [subj()] }, ctxOnA);
+    t('notes: a peer snapshot without a notes table merges cleanly (local notes kept)',
+      r.decisions.notes.inserts.length === 0 && r.decisions.notes.updates.length === 0 &&
+      r.decisions.subjects.inserts.length === 1);
+  }
+
+  t('review: note bodies that differ are a real conflict',
+    !semanticallyEqual(NOTES, note({ body: 'quiz postponed' }), note({ body: 'quiz moved to Friday', updated_at: T1 })));
+  t('review: identical note twins (different id/timestamps) are not reviewable',
+    semanticallyEqual(NOTES, note(), note({ id: 'n-other', created_at: T1, updated_at: T1 })));
+  t('review: deleted vs active note is a real conflict',
+    !semanticallyEqual(NOTES, note({ deleted_at: T1 }), note()));
+}
+
 console.log(failures === 0 ? '\nALL ENGINE TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

@@ -8,6 +8,8 @@ import GridSelectionLayer from './GridSelectionLayer';
 import ConfirmDialog from './ConfirmDialog';
 import { missingCounts, columnStats, blankEntries } from '@/lib/classStats';
 import { scrollThumbMetrics } from '@/lib/gridSelection';
+import { columnCodes } from '@/lib/shortCodes';
+import { resolveHighlight, defaultHighlightConfig } from '@/lib/highlights';
 import { formatGrade, formatNumber, toCents, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
@@ -38,6 +40,13 @@ const PERIOD_COLORS = {
 
 const STICKY_NO = 'sticky-col';
 const STICKY_NAME = 'sticky-col-2';
+
+// Fallback when the page hasn't provided a highlight config (never in
+// production — the page always loads one; this keeps the grid safe alone).
+const DEFAULT_HL_CONFIG = defaultHighlightConfig();
+
+/** Inline custom properties that .gb-hl paints from (see globals.css). */
+const hlVars = (hl) => (hl ? { '--hl-bg': hl.bg, '--hl-fg': hl.fg } : undefined);
 
 /**
  * One primitive for every range mutation (batch 2a ships clear; fill and
@@ -91,6 +100,15 @@ export default function GradebookTable({
   onBulkUpdate,
   showStats,
   showMissingHighlight,
+  showCodes,          // automatic short-code header row (v1.8.0)
+  highlightConfig,    // the user's coloring rules (v1.8.0)
+  columnNotes,        // { [columnId]: body } (v1.8.0)
+  cellNotes,          // { [`${columnId}:${studentId}`]: body } (v1.8.0)
+  getCellNote,        // stable getter for the selection layer's menu
+  onEditCellNote,
+  onDeleteCellNote,
+  onEditColumnNote,
+  onDeleteColumnNote,
   rosterNumbers,
   onFocusColumn,
   onNotify,
@@ -109,6 +127,12 @@ export default function GradebookTable({
   onAddToGroup,
   onStudentFocus,
 }) {
+  const hlConfig = highlightConfig || DEFAULT_HL_CONFIG;
+  // Header depth: 4 rows, +1 when the short-code row is shown. The #/Name/
+  // Final cells span the full depth; the per-period "Grade" header spans
+  // everything below the period band.
+  const codesOn = showCodes !== false;
+  const headDepth = codesOn ? 5 : 4;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
   const [newAssessmentName, setNewAssessmentName] = useState('');
@@ -612,8 +636,8 @@ export default function GradebookTable({
         <thead>
           {/* Row 1: Period Headers */}
           <tr>
-            <th className={`${STICKY_NO} border-b border-gray-200 bg-white w-10 text-center`} rowSpan={4}>#</th>
-            <th className={`${STICKY_NAME} relative border-b border-gray-200 bg-white text-left px-3`} rowSpan={4}>
+            <th className={`${STICKY_NO} border-b border-gray-200 bg-white w-10 text-center`} rowSpan={headDepth}>#</th>
+            <th className={`${STICKY_NAME} relative border-b border-gray-200 bg-white text-left px-3`} rowSpan={headDepth}>
               Student Name
               {/* Excel-style resize: drag to size, double-click to auto-fit. */}
               <span
@@ -691,7 +715,7 @@ export default function GradebookTable({
               );
             })}
 
-            <th className="bg-blue-900 text-white text-center py-1.5 px-3 font-semibold text-xs" rowSpan={4}>
+            <th className="bg-blue-900 text-white text-center py-1.5 px-3 font-semibold text-xs" rowSpan={headDepth}>
               Final<br />Grade
             </th>
           </tr>
@@ -730,7 +754,7 @@ export default function GradebookTable({
                     ))}
                   </SortableContext>
                   <th
-                    rowSpan={3}
+                    rowSpan={headDepth - 1}
                     className={`${colors.light} ${colors.text} text-center font-semibold px-2 py-1.5`}
                   >
                     Grade
@@ -766,6 +790,9 @@ export default function GradebookTable({
                       onOpenMenu={openMenu}
                       onFocusColumn={handleFocusColumn}
                       onNotify={onNotify}
+                      columnNotes={columnNotes}
+                      onEditColumnNote={onEditColumnNote}
+                      onDeleteColumnNote={onDeleteColumnNote}
                     />
                   ))}
                 </React.Fragment>
@@ -773,7 +800,40 @@ export default function GradebookTable({
             })}
           </tr>
 
-          {/* Row 4: Max Scores */}
+          {/* Short-code row (v1.8.0, toggleable): Q1 Q2 A1 AS1 … — the compact
+              labels of a paper class record, DERIVED from the current column
+              order every render (src/lib/shortCodes.js), so reordering or
+              deleting a column renumbers them by construction. */}
+          {codesOn && (
+            <tr>
+              {periods.map(period => (
+                <React.Fragment key={period.id}>
+                  {period.assessments.map(a => {
+                    if (a.columns.length === 0) {
+                      return <th key={`${a.id}-code-empty`} className="bg-white border-r border-gray-200 px-1 py-0" />;
+                    }
+                    const codes = columnCodes(a);
+                    return a.columns.map((col, i) => (
+                      <th
+                        key={col.id}
+                        data-col-head={col.id}
+                        className="bg-white border-r border-gray-200 px-1 py-0 text-center"
+                      >
+                        <span
+                          className="block text-[8.5px] font-semibold tracking-wide text-gray-400 leading-3 py-px"
+                          title={`${a.is_exam ? 'Exam' : a.name} — automatic short code`}
+                        >
+                          {codes[i]}
+                        </span>
+                      </th>
+                    ));
+                  })}
+                </React.Fragment>
+              ))}
+            </tr>
+          )}
+
+          {/* Max Scores row */}
           <tr>
             {periods.map(period => {
               const colors = PERIOD_COLORS[period.type];
@@ -799,6 +859,9 @@ export default function GradebookTable({
                       onOpenMenu={openMenu}
                       onFocusColumn={handleFocusColumn}
                       onNotify={onNotify}
+                      columnNotes={columnNotes}
+                      onEditColumnNote={onEditColumnNote}
+                      onDeleteColumnNote={onDeleteColumnNote}
                     />
                   ))}
                 </React.Fragment>
@@ -862,36 +925,65 @@ export default function GradebookTable({
                     <React.Fragment key={period.id}>
                       {period.assessments.map(a =>
                         a.columns.length > 0 ? (
-                          a.columns.map(col => (
-                            <td key={col.id} className="p-0 border-r border-gray-100">
-                              <ScoreCell
-                                columnId={col.id}
-                                studentId={student.id}
-                                initialValue={scores?.[col.id]?.[student.id]}
-                                maxScore={col.max_score}
-                                onUpdate={onUpdateScore}
-                                onAttendanceApplied={onAttendanceApplied}
-                                onHistoryPush={onHistoryPush}
-                                onSaveError={onSaveError}
-                              />
-                            </td>
-                          ))
+                          a.columns.map(col => {
+                            // Cell note (v1.8.0): indicator + hover text live
+                            // on the td — the memoized ScoreCell never grows
+                            // a prop for them (its own <input> has no title,
+                            // so the td's tooltip shows over it).
+                            const noteBody = cellNotes?.[`${col.id}:${student.id}`];
+                            return (
+                              <td
+                                key={col.id}
+                                className="p-0 border-r border-gray-100 relative"
+                                title={noteBody || undefined}
+                              >
+                                <ScoreCell
+                                  columnId={col.id}
+                                  studentId={student.id}
+                                  initialValue={scores?.[col.id]?.[student.id]}
+                                  maxScore={col.max_score}
+                                  onUpdate={onUpdateScore}
+                                  onAttendanceApplied={onAttendanceApplied}
+                                  onHistoryPush={onHistoryPush}
+                                  onSaveError={onSaveError}
+                                />
+                                {!!noteBody && <span className="gb-note-dot" aria-hidden="true" />}
+                              </td>
+                            );
+                          })
                         ) : (
                           // Placeholder cell so body rows stay aligned with the
                           // header placeholder of assessments that have no columns yet.
                           <td key={`${a.id}-empty`} className="p-0 border-r border-gray-100 bg-gray-50/60" />
                         )
                       )}
-                      <td key={`${period.id}-grade-${student.id}`} className={`grade-col ${colors.light} ${colors.text} text-center px-2 py-1 border-r-2 border-gray-300`}>
-                        {formatGrade(periodGrades[period.type])}
-                      </td>
+                      {(() => {
+                        // Failed-grade rule (v1.8.0): the computed period
+                        // grade tints when it falls below the configured
+                        // passing line — same rule system as the cells.
+                        const pgHl = resolveHighlight('periodGrade', { grade: periodGrades[period.type] }, hlConfig);
+                        return (
+                          <td
+                            key={`${period.id}-grade-${student.id}`}
+                            style={hlVars(pgHl)}
+                            className={`grade-col ${colors.light} ${colors.text} text-center px-2 py-1 border-r-2 border-gray-300 ${pgHl ? 'gb-hl' : ''}`}
+                          >
+                            {formatGrade(periodGrades[period.type])}
+                          </td>
+                        );
+                      })()}
                     </React.Fragment>
                   );
                 })}
 
-                <td className="final-grade-col text-center px-2 py-1">
-                  {formatGrade(finalGrade)}
-                </td>
+                {(() => {
+                  const fgHl = resolveHighlight('finalGrade', { grade: finalGrade }, hlConfig);
+                  return (
+                    <td style={hlVars(fgHl)} className={`final-grade-col text-center px-2 py-1 ${fgHl ? 'gb-hl' : ''}`}>
+                      {formatGrade(finalGrade)}
+                    </td>
+                  );
+                })()}
               </tr>
             );
           })}
@@ -969,6 +1061,9 @@ export default function GradebookTable({
         onApplyRange={handleApplyRange}
         onOpenMenu={openMenu}
         onFocusColumn={handleFocusColumn}
+        getCellNote={getCellNote}
+        onEditCellNote={onEditCellNote}
+        onDeleteCellNote={onDeleteCellNote}
       />
       </div>
     </div>

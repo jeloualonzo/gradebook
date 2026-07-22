@@ -127,8 +127,32 @@ input[type="number"] {
   color: #1d4ed8;
 }
 
-.missing-score {
-  background: #fef9c3 !important;
+/* --- Configurable highlights (v1.8.0) ----------------------------------------
+   ONE class paints every rule tint (missing, zero, over-max, below-passing,
+   failed grades …): the matching rule's colors arrive as custom properties
+   set inline by the cell — see src/lib/highlights.js for the rule registry
+   and Settings → Cell Coloring for the user's order/colors. !important keeps
+   the same precedence the old missing-score yellow had: rule tints stay
+   visible under the row hover/focus tints; the find-a-student amber (higher
+   specificity, !important) still wins on the active find row. */
+.gb-hl {
+  background-color: var(--hl-bg, transparent) !important;
+  color: var(--hl-fg, inherit) !important;
+}
+
+/* Note indicator (v1.8.0): Excel's corner triangle — the learned convention
+   for "there's a comment here". Rendered at the td level (position:relative
+   parent), so the memoized score cells never grow a prop for it. */
+.gb-note-dot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 6px solid #b91c1c;
+  border-left: 6px solid transparent;
+  pointer-events: none;
+  z-index: 4; /* under the selection overlay (5) — a range slides over it */
 }
 
 /* --- Active-row indication -------------------------------------------------
@@ -352,13 +376,10 @@ input[type="number"] {
   display: none;
 }
 
-/* Missing-score highlight toggle — ONE toggle, ONE visual system (v1.7.1):
-   the cell tint and the name chips disappear entirely; count surfaces
-   (stats footer, selection pill) keep their numbers but drop the amber
-   urgency — the data stays, the shouting stops. */
-.gb-hide-missing .missing-score {
-  background: #ffffff !important;
-}
+/* Missing-score highlight toggle — ONE toggle, ONE visual system (v1.7.1;
+   since v1.8.0 the toggle IS the missing rule's enabled flag): with the rule
+   off, cells simply resolve no highlight, and this class retires the chips
+   and count cues alongside — the data stays, the shouting stops. */
 .gb-hide-missing .gb-missing-chip {
   display: none;
 }

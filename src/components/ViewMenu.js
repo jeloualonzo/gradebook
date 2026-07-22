@@ -12,6 +12,7 @@ export default function ViewMenu({
   viewMode, viewThreshold, viewSort, applyView,
   showStats, toggleStats,
   showMissingHighlight, toggleMissingHighlight,
+  showCodes, toggleCodes,
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -28,7 +29,7 @@ export default function ViewMenu({
     };
   }, [open]);
 
-  const nonDefault = viewMode !== 'all' || viewSort !== 'az' || showStats || showMissingHighlight === false;
+  const nonDefault = viewMode !== 'all' || viewSort !== 'az' || showStats || showMissingHighlight === false || showCodes === false;
   const seg = (active) =>
     `px-2 py-1 text-xs rounded border ${active ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`;
   const row = 'flex items-center justify-between gap-3 py-1.5';
@@ -90,10 +91,20 @@ export default function ViewMenu({
             <span className={label}>Class statistics footer</span>
             <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={!!showStats} onChange={toggleStats} />
           </label>
-          <label className={`${row} cursor-pointer`} title="The amber tint on blank cells — the missing-work chips stay either way">
+          <label className={`${row} cursor-pointer`} title="The tint on blank cells and the missing-work chips — the same switch as the Missing rule in Settings → Cell Coloring">
             <span className={label}>Missing-score highlight</span>
             <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={showMissingHighlight !== false} onChange={toggleMissingHighlight} />
           </label>
+          <label className={`${row} cursor-pointer`} title="Q1 Q2 A1 … — automatic short codes under the dates, renumbered with the current column order">
+            <span className={label}>Assessment short codes</span>
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={showCodes !== false} onChange={toggleCodes} />
+          </label>
+          <a
+            href="/settings?tab=formatting"
+            className="block text-xs text-blue-600 hover:underline pt-2 mt-1 border-t border-gray-100"
+          >
+            Cell coloring rules…
+          </a>
         </div>
       )}
     </div>

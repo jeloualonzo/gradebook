@@ -6,6 +6,7 @@ export function useGradebook(subjectId) {
   const [periods, setPeriods] = useState([]);
   const [students, setStudents] = useState([]);
   const [scores, setScores] = useState({});
+  const [notes, setNotes] = useState([]); // raw alive note rows (v1.8.0)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -14,27 +15,31 @@ export function useGradebook(subjectId) {
     // needed here (fetchAll only runs on mount / subjectId change).
     setError(null);
     try {
-      const [subjectRes, periodsRes, studentsRes, scoresRes] = await Promise.all([
+      const [subjectRes, periodsRes, studentsRes, scoresRes, notesRes] = await Promise.all([
         fetch(`/api/subjects/${subjectId}`),
         fetch(`/api/subjects/${subjectId}/periods`),
         fetch(`/api/subjects/${subjectId}/students`),
         fetch(`/api/subjects/${subjectId}/scores`),
+        fetch(`/api/subjects/${subjectId}/notes`),
       ]);
 
       if (!subjectRes.ok) throw new Error('Subject not found');
       if (!periodsRes.ok) throw new Error('Failed to load grading periods');
       if (!studentsRes.ok) throw new Error('Failed to load student list');
       if (!scoresRes.ok) throw new Error('Failed to load grades');
+      // Notes are additive context — a failed load must never block grades.
 
       const subjectData = await subjectRes.json();
       const periodsData = await periodsRes.json();
       const studentsData = await studentsRes.json();
       const scoresData = await scoresRes.json();
+      const notesData = notesRes.ok ? await notesRes.json().catch(() => []) : [];
 
       setSubject(subjectData);
       setPeriods(Array.isArray(periodsData) ? periodsData : []);
       setStudents(Array.isArray(studentsData) ? studentsData : []);
       setScores(scoresData && typeof scoresData === 'object' ? scoresData : {});
+      setNotes(Array.isArray(notesData) ? notesData : []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -178,10 +183,32 @@ export function useGradebook(subjectId) {
     }
   }, [subjectId]);
 
+  const refreshNotes = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/subjects/${subjectId}/notes`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotes(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [subjectId]);
+
+  // Optimistically set/replace/remove one note in local state (body = null
+  // removes). Server writes happen in the page's save/delete handlers.
+  const patchNoteLocal = useCallback((entityType, entityId, body) => {
+    setNotes(prev => {
+      const rest = prev.filter(n => !(n.entity_type === entityType && n.entity_id === entityId));
+      if (body === null || body === undefined) return rest;
+      return [...rest, { entity_type: entityType, entity_id: entityId, body }];
+    });
+  }, []);
+
   return {
-    subject, periods, students, scores,
+    subject, periods, students, scores, notes,
     loading, error,
     updateScore, bulkUpdateScores, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
-    refreshPeriods, refreshStudents, refreshScores, refreshSubject,
+    refreshPeriods, refreshStudents, refreshScores, refreshSubject, refreshNotes, patchNoteLocal,
   };
 }

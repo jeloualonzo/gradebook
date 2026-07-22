@@ -149,6 +149,30 @@ CREATE TABLE IF NOT EXISTS group_students (
 );
 CREATE INDEX IF NOT EXISTS idx_group_students_group ON group_students(group_id);
 
+-- Free-form notes (schema v8) — the margin scribbles of a paper record.
+-- ONE table for every annotation level, present and future:
+--   entity_type 'column'  entity_id = assessment_columns.id   (a date's note)
+--   entity_type 'cell'    entity_id = column_id || ':' || student_id
+--   entity_type 'student' entity_id = students.id             (future UI)
+--   entity_type 'subject' entity_id = subjects.id             (future UI)
+-- Notes are INDEPENDENT data: a score can be blank while its note remains;
+-- only deleting the note removes it. subject_id is denormalized so one
+-- indexed query loads a gradebook's notes (and future "Search Notes" is a
+-- WHERE body LIKE over this single table). Synced like everything else:
+-- UUID id, natural key (entity_type, entity_id), updated_at LWW, tombstones.
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('subject','student','column','cell')),
+  entity_id TEXT NOT NULL,
+  subject_id TEXT,
+  body TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  UNIQUE (entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notes_subject ON notes(subject_id);
+
 -- Sync conflict audit log (LOCAL-ONLY — never exported in snapshots).
 -- One row per merge decision that overwrote a value THIS laptop changed
 -- since the last common state with that peer (schema v2).

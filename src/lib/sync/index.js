@@ -410,6 +410,14 @@ function describeRow(tableName, row) {
     }
     case 'student_groups':
       return { label: 'Student group', value: `${row.name}${row.deleted_at ? ' (deleted)' : ''}` };
+    case 'notes': {
+      const target = describeNoteTarget(row);
+      const body = String(row.body || '');
+      return {
+        label: `Note — ${target}`,
+        value: row.deleted_at ? 'deleted' : (body.length > 80 ? body.slice(0, 77) + '…' : body),
+      };
+    }
     case 'group_students': {
       const grp = get('SELECT name FROM student_groups WHERE id = ?', [row.group_id]);
       return {
@@ -419,6 +427,46 @@ function describeRow(tableName, row) {
     }
     default:
       return { label: tableName.replace(/_/g, ' '), value: row.deleted_at ? 'deleted' : 'edited' };
+  }
+}
+
+/**
+ * What a note is ATTACHED TO, in gradebook language — shared by the conflict
+ * list label and the details context ("Quiz · July 8 — IT101" beats a UUID).
+ */
+function describeNoteTarget(row) {
+  const get = (sql, params) => { try { return db.get(sql, params); } catch { return null; } };
+  const columnPlace = (columnId) => {
+    const m = get(
+      `SELECT ac.date, a.name AS assessment, a.is_exam, p.type AS period, s.name AS subject
+         FROM assessment_columns ac
+         JOIN assessments a ON a.id = ac.assessment_id
+         JOIN grading_periods p ON p.id = a.period_id
+         JOIN subjects s ON s.id = p.subject_id
+        WHERE ac.id = ?`, [columnId]);
+    return m
+      ? `${m.is_exam ? 'Exam' : m.assessment}${m.date ? ' · ' + longDate(m.date) : ''} (${m.period} — ${m.subject})`
+      : 'an assessment column';
+  };
+  switch (row.entity_type) {
+    case 'column':
+      return columnPlace(row.entity_id);
+    case 'cell': {
+      const [columnId, studentId] = String(row.entity_id || '').split(':');
+      const student = get('SELECT last_name, first_name FROM students WHERE id = ?', [studentId]);
+      const who = student ? `${student.last_name}, ${student.first_name}` : 'a student';
+      return `${who} — ${columnPlace(columnId)}`;
+    }
+    case 'student': {
+      const student = get('SELECT last_name, first_name FROM students WHERE id = ?', [row.entity_id]);
+      return student ? `${student.last_name}, ${student.first_name}` : 'a student';
+    }
+    case 'subject': {
+      const subj = get('SELECT name FROM subjects WHERE id = ?', [row.entity_id]);
+      return subj ? subj.name : 'a subject';
+    }
+    default:
+      return 'an item';
   }
 }
 
@@ -466,6 +514,8 @@ function conflictSubjectId(tableName, row) {
           WHERE ac.id = ?`,
         [row.column_id]
       )?.subject_id || null;
+    case 'notes':
+      return row.subject_id || null; // denormalized at write time
     default:
       return null; // student groups etc. — not subject-scoped
   }
@@ -715,6 +765,10 @@ export function conflictDetails(conflictId) {
         ['name', 'Group Name'],
         ['description', 'Description'],
       ]);
+      break;
+    case 'notes':
+      push('Note on', describeNoteTarget(winnerRow));
+      comparison = fieldComparison([['body', 'Note']]);
       break;
     case 'subjects':
       comparison = fieldComparison([

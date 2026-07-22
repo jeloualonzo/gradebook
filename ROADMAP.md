@@ -184,9 +184,19 @@ professional desktop feel over adding features.
 | 6 — Analytics | queued | Insights, not dashboards |
 | 7 — Polish | continuous — first dedicated batch shipped (v1.7.0) | Menu-row highlight, native-proportional sticky scrollbar (single bar), wheel-proof numeric inputs, the undo split + edit context menu, Office-style adaptive toolbar with View popover (sidebar considered and rejected — grid width wins), missing-highlight toggle, Focus Assessment mode, remove-imported-group, subject list (count · combined term · persisted sort) |
 
-One phase per fully-verified release cycle: eslint → engine (50) →
-scenario lab (60) → recycle (14) → workflows (22) → window-state (30) →
-`--no-pack` → push → blob-SHA check → `desktop:release`.
+**Owner-directed batches outside the phase sequence:** v1.7.1 (three-level
+recovery model, retroactive counts-as-attendance, dock-aware layout, SemVer
+adopted) · v1.7.2 (two-mode cells, custom dock thumb) · **v1.8.0** (Modal
+focus-trap root fix; configurable cell-coloring rules with priority
+reordering; automatic assessment short codes; synced free-form NOTES on
+date columns + score cells — the first snapshot-version bump, DB v8 /
+snapshot v6; notes data model already carries student/subject levels and is
+Search-Notes-ready).
+
+One phase per fully-verified release cycle: eslint → engine (59) →
+formatting (48) → grid-selection (48) → class-stats (25) → scenario lab
+(71) → recycle (14) → workflows (55) → window-state (34) → `--no-pack` →
+push → blob-SHA check → `desktop:release`.
 
 ## Appendix C — Design-review Top 20 (2026-07-10, compact)
 

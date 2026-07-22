@@ -5,11 +5,13 @@ import { useSearchParams } from 'next/navigation';
 import SyncPanel from '@/components/SyncPanel';
 import RecycleBinPanel from '@/components/RecycleBinPanel';
 import ConflictReviewPanel from '@/components/ConflictReviewPanel';
+import HighlightSettingsPanel from '@/components/HighlightSettingsPanel';
 import Toast from '@/components/Toast';
 import { usePageTitle } from '@/lib/hooks/usePageTitle';
 
 const TABS = [
   { id: 'general', label: 'General' },
+  { id: 'formatting', label: 'Cell Coloring' },
   { id: 'sync', label: 'Synchronization' },
   { id: 'conflicts', label: 'Sync Conflicts' },
   { id: 'deleted', label: 'Recently Deleted' },
@@ -301,6 +303,7 @@ function SettingsContent() {
         </div>
 
         {tab === 'general' && <GeneralTab showToast={showToast} />}
+        {tab === 'formatting' && <HighlightSettingsPanel />}
         {tab === 'sync' && (
           <div className="bg-white border border-gray-200 rounded-lg p-5">
             <SyncPanel onConflictsChanged={refreshConflictCount} />

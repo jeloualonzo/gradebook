@@ -53,6 +53,9 @@ function AssessmentBlock({
   onOpenMenu,
   onFocusColumn,
   onNotify,
+  columnNotes,        // { [columnId]: body } — alive column notes (v1.8.0)
+  onEditColumnNote,   // (columnId) => void — opens the note editor
+  onDeleteColumnNote, // (columnId) => void — deletes with undo + toast
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
@@ -503,6 +506,15 @@ function AssessmentBlock({
         if (input) { input.focus(); input.select?.(); }
       },
     },
+    // Free-form note on this date (v1.8.0) — synced, Excel-comment style.
+    !!onEditColumnNote && {
+      label: columnNotes?.[col.id] ? 'Edit note…' : 'Add note…',
+      onClick: () => onEditColumnNote(col.id),
+    },
+    !!onDeleteColumnNote && !!columnNotes?.[col.id] && {
+      label: 'Delete note',
+      onClick: () => onDeleteColumnNote(col.id),
+    },
     // Attendance source toggle: only meaningful for dated, non-exam columns
     // of ordinary assessments (Attendance itself can't feed Attendance).
     !assessment.is_exam && !isAttendanceAssessment && !!col.date && {
@@ -578,11 +590,13 @@ function AssessmentBlock({
             <span
               className="block text-[9px] cursor-pointer hover:text-blue-600 py-0.5 truncate"
               onClick={() => setEditingDate(col.id)}
-              title={`${formatDateMMDDYYYY(col.date)}${col.attendance_source ? ' — counts as attendance' : ''}`}
+              // The note reads on hover, exactly like an Excel comment.
+              title={`${formatDateMMDDYYYY(col.date)}${col.attendance_source ? ' — counts as attendance' : ''}${columnNotes?.[col.id] ? `\n\n${columnNotes[col.id]}` : ''}`}
             >
               {!!col.attendance_source && <span className="text-green-600 font-bold">✓</span>}
               {formatDateMMDDYYYY(col.date)}
             </span>
+            {!!columnNotes?.[col.id] && <span className="gb-note-dot" aria-hidden="true" />}
             {editingDate === col.id && (
               <input
                 type="date"

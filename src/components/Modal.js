@@ -13,6 +13,17 @@ const FOCUSABLE =
 export default function Modal({ open, onClose, title, children, width = 'max-w-lg' }) {
   const ref = useRef(null);
 
+  // onClose lives in a ref so the trap effect below can depend on `open`
+  // ALONE. Parents pass fresh arrow functions every render; if onClose were
+  // a dependency, any parent re-render WHILE THE DIALOG IS OPEN (e.g. a
+  // score committing in the Focus Assessment modal) would tear the effect
+  // down and set it up again — and the teardown "restores" focus to
+  // whatever element was focused at the previous setup. That was the
+  // focus-jumps-to-an-earlier-student bug: the trap must mount once per
+  // OPEN, and its cleanup must run only on a true close/unmount.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
   // Desktop dialog conventions: focus moves INTO the dialog when it opens
   // ([data-autofocus] first, else the first field), Tab cycles only within
   // it (focus trap), Escape closes the top dialog, and focus returns to
@@ -41,7 +52,7 @@ export default function Modal({ open, onClose, title, children, width = 'max-w-l
     const handleKey = (e) => {
       if (!isTop()) return;
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current?.();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -71,7 +82,9 @@ export default function Modal({ open, onClose, title, children, width = 'max-w-l
         previouslyFocused.focus?.();
       }
     };
-  }, [open, onClose]);
+    // `open` only — see onCloseRef above. Re-running this effect mid-session
+    // steals focus; it must track true open/close transitions and nothing else.
+  }, [open]);
 
   if (!open) return null;
   // Modals open only via user interaction, so document always exists here —

@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -102,6 +102,30 @@ export const MIGRATIONS = {
     if (!cols.includes('reviewed_at')) {
       db.exec('ALTER TABLE sync_conflicts ADD COLUMN reviewed_at TEXT');
     }
+  },
+
+  // v8 — free-form notes: one polymorphic table for every annotation level
+  // (assessment date columns and score cells today; students and subjects
+  // ready for a future UI). SYNCED — this is the first migration since v3
+  // that also bumps the snapshot schema_version (engine.mjs, v5 → v6): a
+  // laptop still on the previous app version will pause importing this
+  // laptop's snapshots until it updates too. Guarded with IF NOT EXISTS
+  // because schema.mjs (which runs first) also creates it on fresh installs.
+  8: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notes (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL CHECK (entity_type IN ('subject','student','column','cell')),
+        entity_id TEXT NOT NULL,
+        subject_id TEXT,
+        body TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        UNIQUE (entity_type, entity_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_notes_subject ON notes(subject_id);
+    `);
   },
 };
 

@@ -499,5 +499,61 @@ await reviewAll();
   check('S13: and no conflicts anywhere', (await unrev(A)) === 0 && (await unrev(B)) === 0);
 }
 
+// ---------- S14: notes sync (v1.8.0 — snapshot v6, first new synced table) ----
+// Free-form notes ride the same pipeline as every other synced row: LWW by
+// natural key (entity_type + entity_id), tombstoned deletes, semantic-only
+// conflict logging — proven here over two REAL instances.
+{
+  const notesOn = async (port) => must(port, 'GET', `/api/subjects/${subj}/notes`);
+  const findNote = (list, type, eid) => list.find(n => n.entity_type === type && n.entity_id === eid);
+  const cellKey = `${cols[0]}:${st[0]}`;
+
+  // Born on A, visible on B after one round.
+  await must(A, 'PUT', '/api/notes', { entity_type: 'column', entity_id: cols[0], subject_id: subj, body: 'quiz moved from Monday' });
+  await must(A, 'PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: subj, body: 'absent, excused' });
+  await sync(A); await sync(B);
+  const s14b = await notesOn(B);
+  check('S14: notes propagate A → B (column + cell)',
+    findNote(s14b, 'column', String(cols[0]))?.body === 'quiz moved from Monday' &&
+    findNote(s14b, 'cell', cellKey)?.body === 'absent, excused');
+
+  // Concurrent edit of the SAME cell note: newest wins on both, one
+  // conflict logged on the losing side, in note language.
+  await must(A, 'PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: subj, body: 'A version' });
+  await sleep(60);
+  await must(B, 'PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: subj, body: 'B version (newer)' });
+  await sync(A); await sync(B); await sync(A);
+  const afterA = await notesOn(A);
+  const afterB = await notesOn(B);
+  check('S14: concurrent note edits converge by LWW on both laptops',
+    findNote(afterA, 'cell', cellKey)?.body === 'B version (newer)' &&
+    findNote(afterB, 'cell', cellKey)?.body === 'B version (newer)');
+  // The conflict logs on B — the laptop whose local (newer) note REJECTED a
+  // genuinely changed peer version (winner: 'local'). A's later import of
+  // B's winning note is basis-suppressed: A's discarded version was exactly
+  // what B had already seen, an informed sequential overwrite (same shape
+  // as S13's score conflict).
+  const s14List = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  check('S14: exactly one real conflict logged, on the rejecting side, as a Note',
+    s14List.length === 1 && s14List[0].label.startsWith('Note') &&
+    s14List[0].kept === 'B version (newer)' && s14List[0].discarded === 'A version' &&
+    (await unrev(A)) === 0,
+    JSON.stringify(s14List.map(c => [c.label, c.kept, c.discarded])));
+  await reviewAll();
+
+  // Deleting a note tombstones it — the deletion propagates, and the same
+  // outcome on both sides never becomes a review item.
+  await must(B, 'DELETE', '/api/notes', { entity_type: 'column', entity_id: String(cols[0]) });
+  await sync(B); await sync(A);
+  check('S14: a deleted note disappears on both laptops',
+    !findNote(await notesOn(A), 'column', String(cols[0])) &&
+    !findNote(await notesOn(B), 'column', String(cols[0])));
+  check('S14: the delete propagation logs no conflicts', (await unrev(A)) === 0 && (await unrev(B)) === 0);
+
+  // Snapshot envelope: both sides now speak schema v6.
+  const status = await must(A, 'GET', '/api/sync');
+  check('S14: sync stays healthy after the schema-v6 rounds', !status.folder_problem && status.peers.length === 1);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

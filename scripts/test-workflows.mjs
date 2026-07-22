@@ -277,5 +277,57 @@ const imp8 = await must('POST', `/api/subjects/${R7}/import-students`, { groupId
 check('F8: group import returns the created ids (undoability contract)',
   Array.isArray(imp8.created_ids) && imp8.created_ids.length === imp8.imported && imp8.imported === 2);
 
+// ============ Feature 9: free-form notes (v1.8.0) ============
+// Notes are INDEPENDENT data: they live in their own synced table, keyed by
+// what they annotate — nothing in the score lifecycle touches them.
+const N = await mkSubject('Notes 101');
+const n1 = (await add(N, 'Reyes', 'Ana')).id;
+const n9Periods = await must('GET', `/api/subjects/${N}/periods`);
+const n9Quiz = n9Periods[0].assessments.find(x => x.name === 'Quiz');
+const n9Col = (await must('POST', `/api/assessments/${n9Quiz.id}/columns`, { date: '2026-07-21', max_score: 10 })).id;
+const notesOf = async () => must('GET', `/api/subjects/${N}/notes`);
+const noteFor = (list, type, eid) => list.find(x => x.entity_type === type && x.entity_id === eid);
+
+await must('PUT', '/api/notes', { entity_type: 'column', entity_id: n9Col, subject_id: N, body: 'Quiz postponed — class suspension' });
+check('F9: column note saved and readable via the subject notes endpoint',
+  noteFor(await notesOf(), 'column', String(n9Col))?.body === 'Quiz postponed — class suspension');
+
+// A note on an EMPTY cell: annotation without a score — and no phantom score.
+const cellKey = `${n9Col}:${n1}`;
+await must('PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: N, body: 'absent — makeup on Friday' });
+check('F9: cell note on an empty cell exists without inventing a score',
+  noteFor(await notesOf(), 'cell', cellKey)?.body === 'absent — makeup on Friday' &&
+  cell(await scoresOf(N), n9Col, n1) === undefined);
+
+// Independence: a score arrives, then is CLEARED — the note stays put.
+await must('PUT', `/api/scores/${n9Col}/${n1}`, { value: 7 });
+await must('PUT', `/api/scores/${n9Col}/${n1}`, { value: null });
+check('F9: clearing the score leaves the note untouched (independent data)',
+  cell(await scoresOf(N), n9Col, n1) === undefined &&
+  noteFor(await notesOf(), 'cell', cellKey)?.body === 'absent — makeup on Friday');
+
+// Editing upserts by natural key: one note per entity, never a duplicate.
+await must('PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: N, body: 'makeup done — 8/10' });
+const editedNotes = await notesOf();
+check('F9: editing replaces the body (one note per entity)',
+  noteFor(editedNotes, 'cell', cellKey)?.body === 'makeup done — 8/10' &&
+  editedNotes.filter(x => x.entity_type === 'cell' && x.entity_id === cellKey).length === 1);
+
+check('F9: an empty body is rejected (delete is the way to remove)',
+  (await j('PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: N, body: '   ' })).status === 400);
+check('F9: unknown entity types are rejected',
+  (await j('PUT', '/api/notes', { entity_type: 'grade', entity_id: 'x', subject_id: N, body: 'hm' })).status === 400);
+
+await must('DELETE', '/api/notes', { entity_type: 'cell', entity_id: cellKey });
+check('F9: deleted note disappears from the subject notes',
+  !noteFor(await notesOf(), 'cell', cellKey));
+
+// Delete → re-add revives the SAME row (natural key), so sync stays sane.
+await must('PUT', '/api/notes', { entity_type: 'cell', entity_id: cellKey, subject_id: N, body: 'second thoughts' });
+const revived = await notesOf();
+check('F9: re-adding after delete revives one note (undo round-trip contract)',
+  noteFor(revived, 'cell', cellKey)?.body === 'second thoughts' &&
+  revived.filter(x => x.entity_type === 'cell' && x.entity_id === cellKey).length === 1);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL WORKFLOW TESTS PASSED');
 process.exit(failures ? 1 : 0);

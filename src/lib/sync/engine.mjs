@@ -36,7 +36,8 @@ export const FORMAT_VERSION = 1;
 //   v3: suffix on students/group_students (name suffixes: Jr., III, …)
 //   v4: attendance_source on assessment_columns (score ⇒ auto-Present)
 //   v5: subject_code on subjects
-export const SCHEMA_VERSION = 5;
+//   v6: notes table (free-form annotations on columns/cells; student/subject ready)
+export const SCHEMA_VERSION = 6;
 
 // Parents strictly before children (foreign-key safe application order).
 // `naturalKey` marks tables whose rows have an identity beyond their UUID —
@@ -86,6 +87,17 @@ export const SYNCED_TABLES = [
     name: 'group_students',
     columns: ['id', 'group_id', 'last_name', 'first_name', 'middle_name', 'suffix', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
     defaults: { suffix: '' },
+  },
+  {
+    // Free-form notes (snapshot v6). Polymorphic annotations: entity_type +
+    // entity_id identify what the note is ON ('column' = a date column,
+    // 'cell' = column_id:student_id, 'student'/'subject' reserved). The
+    // natural key makes "both laptops annotated the same cell" an ordinary
+    // newest-wins conflict instead of a duplicate note.
+    name: 'notes',
+    columns: ['id', 'entity_type', 'entity_id', 'subject_id', 'body', 'created_at', 'updated_at', 'deleted_at'],
+    naturalKey: ['entity_type', 'entity_id'],
+    defaults: { body: '' },
   },
 ];
 

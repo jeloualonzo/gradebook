@@ -20,15 +20,19 @@ import ViewMenu from '@/components/ViewMenu';
 import ContextMenu from '@/components/ContextMenu';
 import AssessmentFocusModal from '@/components/AssessmentFocusModal';
 import RemoveGroupDialog from '@/components/RemoveGroupDialog';
+import NoteEditorDialog from '@/components/NoteEditorDialog';
+import { HighlightContext, loadHighlightConfig, saveHighlightConfig } from '@/lib/highlightsClient';
+import { displayName } from '@/lib/names';
+import { formatDateMMDDYYYY } from '@/lib/dateUtils';
 
 export default function GradebookPage() {
   const { id } = useParams();
   const router = useRouter();
   const {
-    subject, periods, students, scores,
+    subject, periods, students, scores, notes,
     loading, error,
     updateScore, bulkUpdateScores, reorderAssessmentsLocal, patchAssessmentLocal, patchColumnLocal,
-    refreshPeriods, refreshStudents, refreshScores, refreshSubject,
+    refreshPeriods, refreshStudents, refreshScores, refreshSubject, patchNoteLocal,
   } = useGradebook(id);
 
   const [studentsOpen, setStudentsOpen] = useState(false);
@@ -108,15 +112,30 @@ export default function GradebookPage() {
     });
   };
 
-  // Missing-score highlight toggle (v1.7.0) — the amber cell tint, on by
-  // default, persisted per device. The missing-work CHIPS are unaffected.
-  const [showMissingHighlight, setShowMissingHighlight] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return window.localStorage.getItem('gb-missing-hl') !== '0';
-  });
+  // Cell coloring rules (v1.8.0) — the whole conditional-formatting config
+  // (Settings → Cell Coloring), device-local. The View popover's missing
+  // toggle IS the missing rule's enabled flag: one toggle, one system.
+  const [hlConfig, setHlConfig] = useState(() => loadHighlightConfig());
+  const updateHlConfig = useCallback((next) => {
+    setHlConfig(next);
+    saveHighlightConfig(next);
+  }, []);
+  const showMissingHighlight = hlConfig.rules.missing?.enabled !== false;
   const toggleMissingHighlight = () => {
-    setShowMissingHighlight(prev => {
-      try { window.localStorage.setItem('gb-missing-hl', prev ? '0' : '1'); } catch { /* non-fatal */ }
+    updateHlConfig({
+      ...hlConfig,
+      rules: { ...hlConfig.rules, missing: { ...hlConfig.rules.missing, enabled: !showMissingHighlight } },
+    });
+  };
+
+  // Assessment short codes row (v1.8.0) — Q1 Q2 A1 …, on by default.
+  const [showCodes, setShowCodes] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('gb-codes') !== '0';
+  });
+  const toggleCodes = () => {
+    setShowCodes(prev => {
+      try { window.localStorage.setItem('gb-codes', prev ? '0' : '1'); } catch { /* non-fatal */ }
       return !prev;
     });
   };
@@ -191,6 +210,139 @@ export default function GradebookPage() {
   useEffect(() => { scoresRef.current = scores; }, [scores]);
   useEffect(() => { periodsRef.current = periods; }, [periods]);
   const getScores = useCallback(() => scoresRef.current, []);
+
+  // --- Free-form notes (v1.8.0) ------------------------------------------------
+  // Synced annotations on assessment date columns and score cells (the notes
+  // table also carries student/subject levels for a future UI). Notes are
+  // INDEPENDENT data: a score can be blank while its note remains — only
+  // deleting the note removes it. All edits are session-undoable.
+  const columnNotes = useMemo(() => {
+    const m = {};
+    for (const n of notes) if (n.entity_type === 'column') m[n.entity_id] = n.body;
+    return m;
+  }, [notes]);
+  const cellNotes = useMemo(() => {
+    const m = {};
+    for (const n of notes) if (n.entity_type === 'cell') m[n.entity_id] = n.body;
+    return m;
+  }, [notes]);
+  const columnNotesRef = useRef(columnNotes);
+  const cellNotesRef = useRef(cellNotes);
+  const studentsRef = useRef(students);
+  useEffect(() => { columnNotesRef.current = columnNotes; }, [columnNotes]);
+  useEffect(() => { cellNotesRef.current = cellNotes; }, [cellNotes]);
+  useEffect(() => { studentsRef.current = students; }, [students]);
+  const getCellNote = useCallback((columnId, studentId) => cellNotesRef.current[`${columnId}:${studentId}`], []);
+
+  // Write helpers: persist + patch local state in one move (the API rejects
+  // empty bodies; the dialog never sends one).
+  const putNote = useCallback(async (entityType, entityId, body) => {
+    const res = await fetch('/api/notes', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity_type: entityType, entity_id: entityId, subject_id: id, body }),
+    });
+    if (!res.ok) throw new Error('Could not save the note.');
+    patchNoteLocal(entityType, entityId, body);
+  }, [id, patchNoteLocal]);
+  const dropNote = useCallback(async (entityType, entityId) => {
+    const res = await fetch('/api/notes', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity_type: entityType, entity_id: entityId }),
+    });
+    if (!res.ok) throw new Error('Could not delete the note.');
+    patchNoteLocal(entityType, entityId, null);
+  }, [patchNoteLocal]);
+
+  // "Quiz · 07/15/2026 — PRELIM": what a note is on, in gradebook language.
+  const describeColumnTarget = useCallback((columnId) => {
+    for (const p of periodsRef.current) {
+      for (const a of p.assessments || []) {
+        const col = (a.columns || []).find(c => String(c.id) === String(columnId));
+        if (col) return `${a.is_exam ? 'Exam' : a.name}${col.date ? ` · ${formatDateMMDDYYYY(col.date)}` : ''} — ${p.type}`;
+      }
+    }
+    return 'Assessment column';
+  }, []);
+
+  const [noteEditor, setNoteEditor] = useState(null); // { entityType, entityId, subtitle, initialBody, exists }
+  const openColumnNoteEditor = useCallback((columnId) => {
+    const key = String(columnId);
+    const existing = columnNotesRef.current[key];
+    setNoteEditor({
+      entityType: 'column',
+      entityId: key,
+      subtitle: describeColumnTarget(columnId),
+      initialBody: existing || '',
+      exists: !!existing,
+    });
+  }, [describeColumnTarget, setNoteEditor]);
+  const openCellNoteEditor = useCallback((columnId, studentId) => {
+    const key = `${columnId}:${studentId}`;
+    const existing = cellNotesRef.current[key];
+    const student = studentsRef.current.find(s => String(s.id) === String(studentId));
+    setNoteEditor({
+      entityType: 'cell',
+      entityId: key,
+      subtitle: `${student ? displayName(student) : 'Student'} — ${describeColumnTarget(columnId)}`,
+      initialBody: existing || '',
+      exists: !!existing,
+    });
+  }, [describeColumnTarget, setNoteEditor]);
+
+  const pushHistory = history.push; // stable (useCallback) — safe dependency
+  const deleteNoteWithUndo = useCallback(async (entityType, entityId, prevBody) => {
+    try {
+      await dropNote(entityType, entityId);
+    } catch (err) {
+      showToast(err.message, 'error');
+      return;
+    }
+    pushHistory({
+      label: 'delete note',
+      undo: async () => { await putNote(entityType, entityId, prevBody); },
+      redo: async () => { await dropNote(entityType, entityId); },
+    });
+    showToast('Note deleted');
+  }, [dropNote, putNote, showToast, pushHistory]);
+  const handleDeleteColumnNote = useCallback((columnId) => {
+    const key = String(columnId);
+    const prev = columnNotesRef.current[key];
+    if (prev) deleteNoteWithUndo('column', key, prev);
+  }, [deleteNoteWithUndo]);
+  const handleDeleteCellNote = useCallback((columnId, studentId) => {
+    const key = `${columnId}:${studentId}`;
+    const prev = cellNotesRef.current[key];
+    if (prev) deleteNoteWithUndo('cell', key, prev);
+  }, [deleteNoteWithUndo]);
+
+  const handleNoteSave = async (body) => {
+    const t = noteEditor;
+    setNoteEditor(null);
+    if (!t) return;
+    const prev = t.exists ? t.initialBody : null;
+    try {
+      await putNote(t.entityType, t.entityId, body);
+    } catch (err) {
+      showToast(err.message, 'error');
+      return;
+    }
+    history.push({
+      label: prev == null ? 'add note' : 'edit note',
+      undo: async () => {
+        if (prev == null) await dropNote(t.entityType, t.entityId);
+        else await putNote(t.entityType, t.entityId, prev);
+      },
+      redo: async () => { await putNote(t.entityType, t.entityId, body); },
+    });
+    showToast(prev == null ? 'Note added' : 'Note updated');
+  };
+  const handleNoteDeleteFromEditor = async () => {
+    const t = noteEditor;
+    setNoteEditor(null);
+    if (t?.exists) await deleteNoteWithUndo(t.entityType, t.entityId, t.initialBody);
+  };
 
   const handleStudentEditSave = async (form) => {
     setSavingStudent(true);
@@ -280,6 +432,9 @@ export default function GradebookPage() {
   const prelimPeriod = periods.find(p => p.type === 'PRELIM');
 
   return (
+    // Highlight config rides context into the memoized cells (grid AND the
+    // Focus Assessment modal's twins) — no new ScoreCell props.
+    <HighlightContext.Provider value={hlConfig}>
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header ref={headerRef} className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 shrink-0">
         <button onClick={() => router.push('/')} className="text-gray-400 hover:text-gray-700 transition-colors">
@@ -321,6 +476,8 @@ export default function GradebookPage() {
             toggleStats={toggleStats}
             showMissingHighlight={showMissingHighlight}
             toggleMissingHighlight={toggleMissingHighlight}
+            showCodes={showCodes}
+            toggleCodes={toggleCodes}
           />
 
           <div className="w-px h-5 bg-gray-200" aria-hidden="true" />
@@ -422,6 +579,15 @@ export default function GradebookPage() {
           scores={scores}
           showStats={showStats}
           showMissingHighlight={showMissingHighlight}
+          showCodes={showCodes}
+          highlightConfig={hlConfig}
+          columnNotes={columnNotes}
+          cellNotes={cellNotes}
+          getCellNote={getCellNote}
+          onEditCellNote={openCellNoteEditor}
+          onDeleteCellNote={handleDeleteCellNote}
+          onEditColumnNote={openColumnNoteEditor}
+          onDeleteColumnNote={handleDeleteColumnNote}
           rosterNumbers={rosterNumbers}
           onFocusColumn={setFocusColumn}
           onNotify={showToast}
@@ -539,9 +705,19 @@ export default function GradebookPage() {
         />
       )}
 
+      {noteEditor && (
+        <NoteEditorDialog
+          target={noteEditor}
+          onSave={handleNoteSave}
+          onDelete={handleNoteDeleteFromEditor}
+          onClose={() => setNoteEditor(null)}
+        />
+      )}
+
       {toast && (
         <Toast key={toast.k} message={toast.msg} type={toast.type} onDone={() => setToast(null)} />
       )}
     </div>
+    </HighlightContext.Provider>
   );
 }

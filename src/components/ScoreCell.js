@@ -2,6 +2,8 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import { useAutosave } from '@/lib/hooks/useAutosave';
 import { formatNumber } from '@/lib/gradeCalculator';
+import { resolveHighlight } from '@/lib/highlights';
+import { useHighlights } from '@/lib/highlightsClient';
 
 /**
  * One editable score cell.
@@ -49,8 +51,13 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
   }, [initialValue]);
 
   const isEmpty = value === '' || value === null || value === undefined;
-  const numVal = parseFloat(value);
-  const isOver = !isEmpty && numVal > parseFloat(maxScore);
+
+  // Configurable highlighting (v1.8.0): the first enabled rule that matches
+  // (user-ordered priority) colors the cell — missing, zero, over-max,
+  // below-passing … all one system (Settings → Cell Coloring). Read through
+  // context so the memoized cell needs no new prop.
+  const hlConfig = useHighlights();
+  const hl = resolveHighlight('score', { value, max: maxScore }, hlConfig);
 
   const putScore = async (v) => {
     const res = await fetch(`/api/scores/${columnId}/${studentId}`, {
@@ -293,9 +300,8 @@ function ScoreCell({ columnId, studentId, initialValue, maxScore, onUpdate, onAt
       onDoubleClick={() => { if (!editing) beginEdit(); }}
       data-cell="score"
       data-col={columnId}
-      className={`score-cell w-full text-center text-xs py-1.5 border-0 focus:bg-blue-50 transition-colors ${
-        isEmpty ? 'missing-score' : isOver ? 'bg-red-50 text-red-700' : 'bg-white'
-      }`}
+      style={hl ? { '--hl-bg': hl.bg, '--hl-fg': hl.fg } : undefined}
+      className={`score-cell w-full text-center text-xs py-1.5 border-0 focus:bg-blue-50 transition-colors ${hl ? 'gb-hl' : 'bg-white'}`}
     />
   );
 }

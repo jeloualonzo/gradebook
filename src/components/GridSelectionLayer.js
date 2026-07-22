@@ -29,6 +29,9 @@ export default function GridSelectionLayer({
   onApplyRange,   // (entries: [{column_id, student_id, value|null}], label) => void
   onOpenMenu,     // (event, items) => void — the grid's shared context menu
   onFocusColumn,  // (columnId) => void — opens Focus Assessment mode
+  getCellNote,    // (columnId, studentId) => body | undefined — live notes (v1.8.0)
+  onEditCellNote, // (columnId, studentId) => void — opens the note editor
+  onDeleteCellNote, // (columnId, studentId) => void — deletes with undo + toast
 }) {
   // One model instance for the component's lifetime (useState initializer —
   // the lint-sanctioned way to hold a stable non-render value).
@@ -663,6 +666,14 @@ export default function GridSelectionLayer({
       }
       if (multi) items.push({ label: 'Fill down', separatorBefore: !colBlanks, onClick: () => fillDown() });
       if (multi) items.push({ label: `Clear ${model.size()} cells`, danger: true, separatorBefore: !multi, onClick: () => clearSelection() });
+      // Free-form note on THIS cell (v1.8.0) — single-cell only: a note is a
+      // margin scribble on one score, not a range operation.
+      if (!multi && onEditCellNote && colId) {
+        const rowId = g.rows[at.r];
+        const note = getCellNote?.(colId, rowId);
+        items.push({ label: note ? 'Edit note…' : 'Add note…', separatorBefore: true, onClick: () => onEditCellNote(colId, rowId) });
+        if (note && onDeleteCellNote) items.push({ label: 'Delete note', onClick: () => onDeleteCellNote(colId, rowId) });
+      }
       items.push({ label: 'Select column', separatorBefore: !multi, onClick: () => model.selectColumn(at.c) });
       items.push({ label: 'Select row', onClick: () => model.selectRow(at.r) });
       if (onFocusColumn && colId) {
@@ -693,7 +704,7 @@ export default function GridSelectionLayer({
       grid.removeEventListener('cut', onCut);
       grid.removeEventListener('paste', onPaste);
     };
-  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll, getScores, onApplyRange, onFocusColumn]);
+  }, [gridRef, model, cellCoords, rowCoordFromNumberCell, onOpenMenu, clearSelection, copySelection, runPaste, clearClipboardSource, fillDown, startAutoScroll, stopAutoScroll, getScores, onApplyRange, onFocusColumn, getCellNote, onEditCellNote, onDeleteCellNote]);
 
   return (
     <>

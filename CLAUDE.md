@@ -153,7 +153,7 @@ full understanding. Preferences, consistently demonstrated:
 ## Current roadmap
 
 **Completed (shipped, verified):**
-- MySQL → SQLite migration; versioned, concurrency-safe schema migrations (v7)
+- MySQL → SQLite migration; versioned, concurrency-safe schema migrations (v8)
 - Electron desktop shell: splash, window-state + zoom persistence, single
   instance, backups on launch, 90s cold-start tolerance
 - Offline sync: full-state snapshots, LWW merge, natural-key twin adoption,
@@ -177,14 +177,37 @@ full understanding. Preferences, consistently demonstrated:
 - Desktop conventions batch: dialogs (focus trap, Enter/Esc), keyboard context
   menus, dynamic window titles, Ctrl+S flush, F2 rename, Home/End, custom
   scrollbars, subtitle cleanup
-- Permanent test suites: 50 engine + 60 scenario + 14 recycle + 22 workflow +
-  30 window-state; `no-undef` lint (caught a real shipped bug)
+- Permanent test suites: 59 engine + 48 grid-selection + 48 formatting +
+  71 scenario + 25 class-stats + 14 recycle + 55 workflow + 34 window-state;
+  `no-undef` lint (caught a real shipped bug)
 - Semantic conflict review + centralized no-op write guards (v1.0.9): the
   log only surfaces real data divergence (`sync/review.mjs`); saves that
   change nothing no longer stamp `updated_at` (`db.updateRow` + upsert
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- Notes, coloring, codes + the focus-jump root fix (v1.8.0): the Modal
+  focus-trap defect diagnosed at the root (its effect re-ran on every
+  parent render because `onClose` — a fresh arrow — was a dependency, and
+  the teardown "restored" focus to a stale cell; the trap now mounts once
+  per open via an onClose ref, hardening EVERY dialog). Configurable cell
+  coloring: a rules registry (missing / zero / failed score / failed
+  period + final grades / over max) with owner-requested priority
+  reordering — first enabled match wins; per-rule colors + thresholds in
+  Settings → Cell Coloring; device-local; the missing rule IS the View
+  toggle. Automatic assessment short codes (Q1 A1 AS1 L1 AT1 SW1, exam E)
+  derived from column order — never stored, renumber by construction; a
+  toggleable fifth header row. FREE-FORM NOTES — the project's FIRST
+  schema + snapshot bump (DB v7→v8, snapshot v5→v6, the §6 ceremony in
+  full): one polymorphic synced `notes` table (natural key entity_type +
+  entity_id; cell notes `columnId:studentId`; student/subject levels
+  data-model-ready; subject_id denormalized → one-query loads +
+  search-ready), notes INDEPENDENT of the score lifecycle per owner
+  refinement (a blank cell keeps its note until the note is deleted),
+  Excel corner-triangle indicators + hover tooltips at the td level
+  (ScoreCell still zero new props), right-click Add/Edit/Delete on cells
+  and date columns, multiline editor (Ctrl+Enter), Level-2 undo on every
+  note write, conflicts reviewed in gradebook language
 - Data-safety patch (v1.7.2): TWO-MODE score cells — ready (readOnly,
   nothing selected, stray keys harmless; empty cells still type-to-enter
   so entry speed is untouched) vs intentional edit (double-click / F2 /
