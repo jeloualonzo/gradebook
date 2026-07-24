@@ -6,10 +6,11 @@ import ContextMenu from './ContextMenu';
 import FindStudentBar from './FindStudentBar';
 import GridSelectionLayer from './GridSelectionLayer';
 import ConfirmDialog from './ConfirmDialog';
+import WorkspaceAssessmentDialog from './WorkspaceAssessmentDialog';
 import { missingCounts, columnStats, blankEntries } from '@/lib/classStats';
 import { scrollThumbMetrics } from '@/lib/gridSelection';
-import { columnCodes } from '@/lib/shortCodes';
 import { resolveHighlight, defaultHighlightConfig } from '@/lib/highlights';
+import { isWorkspace, workspaceAggregate, workspaceStatus, workspaceSummary } from '@/lib/workspace';
 import { formatGrade, formatNumber, toCents, computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
 import { displayName } from '@/lib/names';
 import AssessmentBlock from './AssessmentBlock';
@@ -109,6 +110,7 @@ export default function GradebookTable({
   onDeleteCellNote,
   onEditColumnNote,
   onDeleteColumnNote,
+  onOpenWorkspace,    // (assessmentId) => void — navigate to the workspace (v1.9.0)
   rosterNumbers,
   onFocusColumn,
   onNotify,
@@ -136,6 +138,7 @@ export default function GradebookTable({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [addingAssessment, setAddingAssessment] = useState(null);
   const [newAssessmentName, setNewAssessmentName] = useState('');
+  const [workspaceCreate, setWorkspaceCreate] = useState(null); // periodId for the creation dialog
 
   // One context menu for the whole grid (portaled to <body>).
   // While a menu is open, the row it came from stays marked (v1.7.0) — a
@@ -386,6 +389,10 @@ export default function GradebookTable({
     const cols = [];
     for (const period of periods) {
       for (const a of period.assessments) {
+        // Workspace details are not rendered in the grid — excluding them
+        // here keeps ranges, fill, clipboard, and missing counts away from
+        // them BY CONSTRUCTION (their computed cells are not inputs).
+        if (isWorkspace(a)) continue;
         for (const c of a.columns) {
           cols.push({ columnId: String(c.id), assessmentId: a.id, periodId: period.id });
         }
@@ -458,6 +465,27 @@ export default function GradebookTable({
     if (!showStats || students.length === 0) return null;
     const ids = geometry.rows;
     const perColumn = new Map(geometry.cols.map(c => [c.columnId, columnStats(c.columnId, ids, scores)]));
+    // Workspace computed columns: per-BAND average of completed students +
+    // the Expected count (students not scored anywhere) for the cue row.
+    const ws = new Map();
+    for (const p of periods) {
+      for (const a of p.assessments) {
+        if (!isWorkspace(a)) continue;
+        let sum = 0;
+        let n = 0;
+        let expected = 0;
+        for (const st of students) {
+          const sid = String(st.id);
+          const status = workspaceStatus(a, scores, sid, p.type);
+          if (status === 'expected') expected += 1;
+          if (status === 'completed') {
+            const agg = workspaceAggregate(a, scores, sid);
+            if (agg) { sum += agg.earned; n += 1; }
+          }
+        }
+        ws.set(`${p.id}:${a.id}`, { avg: n ? sum / n : null, n, expected });
+      }
+    }
     const periodAvg = {};
     let finalSum = 0;
     let finalN = 0;
@@ -475,7 +503,7 @@ export default function GradebookTable({
       if (f !== null && f !== undefined) { finalSum += f; finalN += 1; }
     }
     const avgOf = (t) => (periodAvg[t] ? periodAvg[t].s / periodAvg[t].n : null);
-    return { perColumn, avgOf, finalAvg: finalN ? finalSum / finalN : null };
+    return { perColumn, ws, avgOf, finalAvg: finalN ? finalSum / finalN : null };
   }, [showStats, geometry, scores, periods, students, subject]);
 
   // Fill-blanks-with-0: >5 cells confirms first (the paste-preview threshold);
@@ -551,18 +579,22 @@ export default function GradebookTable({
     const period = periods.find(p => p.id === periodId);
     if (!period) return;
     const byId = new Map(period.assessments.map(a => [a.id, a]));
-    // The exam itself is never draggable.
-    if (byId.get(active.id)?.is_exam) return;
-    const oldIds = period.assessments.map(a => a.id);
-    const oldIdx = oldIds.indexOf(active.id);
-    const newIdx = oldIds.indexOf(over.id);
+    // The exam itself is never draggable; neither are projected term-span
+    // copies (their sort_order belongs to their OWNING period).
+    if (byId.get(active.id)?.is_exam || byId.get(active.id)?.projected) return;
+    const fullOld = period.assessments.map(a => a.id);
+    const oldIdx = fullOld.indexOf(active.id);
+    const newIdx = fullOld.indexOf(over.id);
     if (oldIdx < 0 || newIdx < 0) return;
     // The exam is permanently last: anything dropped below it is placed
     // immediately above it (stable partition keeps relative order intact).
-    const moved = arrayMove(oldIds, oldIdx, newIdx);
+    // Projected copies are dropped from the PERSISTED order entirely — they
+    // are a view, not rows of this period; the projector re-places them.
+    const movedFull = arrayMove(fullOld, oldIdx, newIdx).filter(x => !byId.get(x)?.projected);
+    const oldIds = fullOld.filter(x => !byId.get(x)?.projected);
     const newIds = [
-      ...moved.filter(x => !byId.get(x)?.is_exam),
-      ...moved.filter(x => byId.get(x)?.is_exam),
+      ...movedFull.filter(x => !byId.get(x)?.is_exam),
+      ...movedFull.filter(x => byId.get(x)?.is_exam),
     ];
     if (JSON.stringify(newIds) === JSON.stringify(oldIds)) return; // no-op after clamp
     onReorderLocal?.(periodId, newIds); // layout updates immediately on drop
@@ -584,13 +616,17 @@ export default function GradebookTable({
     });
   };
 
+  // Grid width of one assessment: workspace assessments occupy exactly ONE
+  // column (the computed one), classic ones a column per date (min 1).
+  const gridColsOf = (a) => (isWorkspace(a) ? 1 : Math.max(a.columns.length, 1));
+
   // Total column count — must mirror the <colgroup> below exactly:
   // #, name, then per period (one col per assessment column, min 1) + grade,
   // then the final grade. Used by the no-students message row.
   const totalCols =
     2 +
     periods.reduce(
-      (s, p) => s + p.assessments.reduce((x, a) => x + Math.max(a.columns.length, 1), 0) + 1,
+      (s, p) => s + p.assessments.reduce((x, a) => x + gridColsOf(a), 0) + 1,
       0
     ) +
     1;
@@ -624,7 +660,7 @@ export default function GradebookTable({
           {periods.map(period => (
             <React.Fragment key={period.id}>
               {period.assessments.map(a =>
-                Array.from({ length: Math.max(a.columns.length, 1) }).map((_, i) => (
+                Array.from({ length: gridColsOf(a) }).map((_, i) => (
                   <col key={`${a.id}-${i}`} style={{ width: `${ASSESSMENT_COL_WIDTH_PX}px` }} />
                 ))
               )}
@@ -649,7 +685,7 @@ export default function GradebookTable({
             </th>
 
             {periods.map(period => {
-              const colSpan = period.assessments.reduce((s, a) => s + Math.max(a.columns.length, 1), 0) + 1;
+              const colSpan = period.assessments.reduce((s, a) => s + gridColsOf(a), 0) + 1;
               const colors = PERIOD_COLORS[period.type];
               // Weights that don't total 100 are silently renormalized in the
               // grade math (correct for live standing) — this chip just stops
@@ -666,6 +702,7 @@ export default function GradebookTable({
                     const blanks = blankEntries(periodCols, geometry.rows, getScores?.() || scores, { onlyActive: true });
                     openMenu(e, [
                       { label: 'Add assessment…', onClick: () => setAddingAssessment(period.id) },
+                      { label: 'Add workspace assessment…', onClick: () => setWorkspaceCreate(period.id) },
                       ...(blanks.length > 0 ? [{
                         label: `Fill blanks with 0 in ${period.type} (${blanks.length})`,
                         separatorBefore: true,
@@ -739,6 +776,7 @@ export default function GradebookTable({
                         subjectId={subject.id}
                         colors={colors}
                         mode="header-name"
+                        onOpenWorkspace={onOpenWorkspace}
                         onRefresh={onRefreshPeriods}
                         onRefreshData={onRefreshData}
                         onPatchAssessment={onPatchAssessment}
@@ -779,6 +817,8 @@ export default function GradebookTable({
                         subjectId={subject.id}
                       colors={colors}
                       mode="header-dates"
+                      onOpenWorkspace={onOpenWorkspace}
+                      codesOn={codesOn}
                       onRefresh={onRefreshPeriods}
                       onRefreshData={onRefreshData}
                       onPatchAssessment={onPatchAssessment}
@@ -800,36 +840,43 @@ export default function GradebookTable({
             })}
           </tr>
 
-          {/* Short-code row (v1.8.0, toggleable): Q1 Q2 A1 AS1 … — the compact
-              labels of a paper class record, DERIVED from the current column
-              order every render (src/lib/shortCodes.js), so reordering or
-              deleting a column renumbers them by construction. */}
+          {/* Short-code row (v1.9.0, toggleable): Q1 Q2 A3 ACT1 … — automatic
+              codes DERIVED from the current column order (reordering
+              renumbers by construction), manually editable in place: an
+              instructor's name is preserved; empty returns to automatic.
+              Rendered by AssessmentBlock with the dates row's exact
+              presentation and editing pattern. */}
           {codesOn && (
             <tr>
-              {periods.map(period => (
-                <React.Fragment key={period.id}>
-                  {period.assessments.map(a => {
-                    if (a.columns.length === 0) {
-                      return <th key={`${a.id}-code-empty`} className="bg-white border-r border-gray-200 px-1 py-0" />;
-                    }
-                    const codes = columnCodes(a);
-                    return a.columns.map((col, i) => (
-                      <th
-                        key={col.id}
-                        data-col-head={col.id}
-                        className="bg-white border-r border-gray-200 px-1 py-0 text-center"
-                      >
-                        <span
-                          className="block text-[8.5px] font-semibold tracking-wide text-gray-400 leading-3 py-px"
-                          title={`${a.is_exam ? 'Exam' : a.name} — automatic short code`}
-                        >
-                          {codes[i]}
-                        </span>
-                      </th>
-                    ));
-                  })}
-                </React.Fragment>
-              ))}
+              {periods.map(period => {
+                const colors = PERIOD_COLORS[period.type];
+                return (
+                  <React.Fragment key={period.id}>
+                    {period.assessments.map(a => (
+                      <AssessmentBlock
+                        key={a.id}
+                        assessment={a}
+                        periodId={period.id}
+                        periodType={period.type}
+                        subjectId={subject.id}
+                        colors={colors}
+                        mode="header-codes"
+                        onRefresh={onRefreshPeriods}
+                        onRefreshData={onRefreshData}
+                        onPatchAssessment={onPatchAssessment}
+                        onPatchColumn={onPatchColumn}
+                        getScores={getScores}
+                        getPeriodOrder={getPeriodOrder}
+                        onHistoryPush={onHistoryPush}
+                        onSaveError={onSaveError}
+                        onOpenMenu={openMenu}
+                        onFocusColumn={handleFocusColumn}
+                        onNotify={onNotify}
+                      />
+                    ))}
+                  </React.Fragment>
+                );
+              })}
             </tr>
           )}
 
@@ -924,7 +971,53 @@ export default function GradebookTable({
                   return (
                     <React.Fragment key={period.id}>
                       {period.assessments.map(a =>
-                        a.columns.length > 0 ? (
+                        isWorkspace(a) ? (
+                          // The COMPUTED column (v1.9.0): read-only, click
+                          // opens the workspace. Completed shows the
+                          // aggregated value (coloring rules apply);
+                          // Expected shows — (or the honest 0 of an active
+                          // point bank); N/A never highlights and never
+                          // counts as missing.
+                          (() => {
+                            const sid = String(student.id);
+                            const status = workspaceStatus(a, scores, sid, period.type);
+                            const agg = workspaceAggregate(a, scores, sid);
+                            const wsHl = status === 'completed' && agg
+                              ? resolveHighlight('score', { value: agg.earned, max: agg.max }, hlConfig)
+                              : null;
+                            let display;
+                            let title;
+                            if (status === 'not_applicable') {
+                              const other = (a.allColumns || []).find(c => {
+                                const v = scores?.[c.id]?.[sid];
+                                return v !== undefined && v !== null && v !== '';
+                              });
+                              display = 'N/A';
+                              title = `N/A — completed in ${other?.period_type || 'another period'}`;
+                            } else if (agg) {
+                              display = formatNumber(agg.earned);
+                              title = status === 'completed'
+                                ? `${formatNumber(agg.earned)} of ${formatNumber(agg.max)} — click to open the workspace`
+                                : `Expected — no score yet (counts as ${formatNumber(agg.earned)} of ${formatNumber(agg.max)} once scoring starts)`;
+                            } else {
+                              display = '—';
+                              title = 'Expected — no score yet · click to open the workspace';
+                            }
+                            return (
+                              <td
+                                key={`${a.id}-ws`}
+                                onClick={() => onOpenWorkspace?.(a.id)}
+                                title={title}
+                                style={hlVars(wsHl)}
+                                className={`text-center text-xs py-1.5 cursor-pointer border-r border-gray-100 ${
+                                  wsHl ? 'gb-hl' : status === 'completed' ? 'bg-white text-gray-800' : 'bg-gray-50/60 text-gray-400'
+                                }`}
+                              >
+                                {display}
+                              </td>
+                            );
+                          })()
+                        ) : a.columns.length > 0 ? (
                           a.columns.map(col => {
                             // Cell note (v1.8.0): indicator + hover text live
                             // on the td — the memoized ScoreCell never grows
@@ -998,8 +1091,20 @@ export default function GradebookTable({
               <td className={`${STICKY_NAME} gb-foot-label px-3 text-right`}>Class average</td>
               {periods.map(period => (
                 <React.Fragment key={period.id}>
-                  {period.assessments.map(a =>
-                    a.columns.length > 0 ? (
+                  {period.assessments.map(a => {
+                    if (isWorkspace(a)) {
+                      const w = footerStats.ws.get(`${period.id}:${a.id}`);
+                      return (
+                        <td
+                          key={`${a.id}-wsfoot`}
+                          className="gb-foot-cell"
+                          title={w && w.n > 0 ? `Average of ${w.n} completed in ${period.type}` : 'No completed scores in this period yet'}
+                        >
+                          {w && w.avg !== null ? formatNumber(w.avg) : '—'}
+                        </td>
+                      );
+                    }
+                    return a.columns.length > 0 ? (
                       a.columns.map(col => {
                         const s = footerStats.perColumn.get(String(col.id));
                         return (
@@ -1016,8 +1121,8 @@ export default function GradebookTable({
                       })
                     ) : (
                       <td key={`${a.id}-foot`} className="gb-foot-cell text-gray-300" />
-                    )
-                  )}
+                    );
+                  })}
                   <td className={`gb-foot-cell font-semibold ${PERIOD_COLORS[period.type].text}`}>
                     {formatGrade(footerStats.avgOf(period.type))}
                   </td>
@@ -1030,8 +1135,24 @@ export default function GradebookTable({
               <td className={`${STICKY_NAME} gb-foot-label px-3 text-right`}>Missing</td>
               {periods.map(period => (
                 <React.Fragment key={period.id}>
-                  {period.assessments.map(a =>
-                    a.columns.length > 0 ? (
+                  {period.assessments.map(a => {
+                    if (isWorkspace(a)) {
+                      // Expected = scored NOWHERE yet — the workspace's
+                      // completion cue (never the missing rule: N/A cells
+                      // are not missing work).
+                      const w = footerStats.ws.get(`${period.id}:${a.id}`);
+                      const e = w ? w.expected : 0;
+                      return (
+                        <td
+                          key={`${a.id}-wsfootm`}
+                          className={`gb-foot-cell ${e > 0 ? 'text-amber-600 font-semibold gb-missing-cue' : 'text-gray-300'}`}
+                          title={e > 0 ? `${e} student${e === 1 ? '' : 's'} expected — no score in any period yet` : ''}
+                        >
+                          {e > 0 ? e : '·'}
+                        </td>
+                      );
+                    }
+                    return a.columns.length > 0 ? (
                       a.columns.map(col => {
                         const s = footerStats.perColumn.get(String(col.id));
                         const m = s ? s.missing : 0;
@@ -1043,8 +1164,8 @@ export default function GradebookTable({
                       })
                     ) : (
                       <td key={`${a.id}-footm`} className="gb-foot-cell" />
-                    )
-                  )}
+                    );
+                  })}
                   <td className="gb-foot-cell" />
                 </React.Fragment>
               ))}
@@ -1070,6 +1191,16 @@ export default function GradebookTable({
     {/* In-flow spacer (the StatusBar trick): when the dock floats, the page
         gains real bottom room — the last rows are never hidden under it. */}
     {proxyState.visible && <div className="h-11" aria-hidden="true" />}
+    {workspaceCreate && (
+      <WorkspaceAssessmentDialog
+        periodId={workspaceCreate}
+        periodType={periods.find(p => p.id === workspaceCreate)?.type}
+        onClose={() => setWorkspaceCreate(null)}
+        onHistoryPush={onHistoryPush}
+        onRefresh={onRefreshPeriods}
+        onNotify={onNotify}
+      />
+    )}
     {fillConfirm && (
       <ConfirmDialog
         open

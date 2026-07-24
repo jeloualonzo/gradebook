@@ -4,7 +4,7 @@
  *   · src/lib/highlights.js   (configurable cell coloring rules)
  * Run: node scripts/test-formatting.mjs   (exits non-zero on any failure)
  */
-import { assessmentCode, columnCodes } from '../src/lib/shortCodes.js';
+import { assessmentCode, columnCodes, columnLongName, columnCodeInfo } from '../src/lib/shortCodes.js';
 import {
   HIGHLIGHT_RULES,
   defaultHighlightConfig,
@@ -19,26 +19,31 @@ const t = (name, cond) => {
   if (!cond) failures++;
 };
 
-// ---- short codes -------------------------------------------------------------
+// ---- short codes (v1.9.0 convention) -------------------------------------------
 {
   const codes = (name, n = 1, is_exam = 0) =>
     columnCodes({ name, is_exam, columns: Array.from({ length: n }, (_, i) => ({ id: `c${i}` })) });
 
   t('codes: Quiz → Q1 Q2 Q3, sequential in column order', codes('Quiz', 3).join(' ') === 'Q1 Q2 Q3');
-  t('codes: Activity → A', assessmentCode({ name: 'Activity' }) === 'A');
-  t('codes: Activities (plural) → A', assessmentCode({ name: 'Activities' }) === 'A');
+  // The A/AS/AT ambiguity triangle, dissolved: A = Attendance (the most
+  // frequent category earns the shortest code), ACT = Activity, AS = Assignment.
+  t('codes: Attendance → A (the bare A)', assessmentCode({ name: 'Attendance' }) === 'A');
+  t('codes: Activity → ACT', assessmentCode({ name: 'Activity' }) === 'ACT');
+  t('codes: Activities (plural) → ACT', assessmentCode({ name: 'Activities' }) === 'ACT');
   t('codes: Assignment → AS', assessmentCode({ name: 'Assignment' }) === 'AS');
   t('codes: Laboratory → L', assessmentCode({ name: 'Laboratory' }) === 'L');
   t('codes: Lab → L', assessmentCode({ name: 'Lab' }) === 'L');
-  t('codes: Attendance → AT', assessmentCode({ name: 'Attendance' }) === 'AT');
   t('codes: Seatwork → SW', assessmentCode({ name: 'Seatwork' }) === 'SW');
   t('codes: Seat Work (spaced) → SW', assessmentCode({ name: 'Seat Work' }) === 'SW');
+  t('codes: Performance Task → PT', assessmentCode({ name: 'Performance Task' }) === 'PT');
   t('codes: Project → P', assessmentCode({ name: 'Project' }) === 'P');
   t('codes: Recitation → R', assessmentCode({ name: 'Recitation' }) === 'R');
+  t('codes: Oral Participation → OP', assessmentCode({ name: 'Oral Participation' }) === 'OP');
+  t('codes: Reporting → REP', assessmentCode({ name: 'Reporting' }) === 'REP');
   t('codes: case-insensitive (qUiZ → Q)', assessmentCode({ name: 'qUiZ' }) === 'Q');
   t('codes: is_exam always wins → E', assessmentCode({ name: 'Final Examination', is_exam: 1 }) === 'E');
-  t('codes: exam single auto-column reads plain E (no series of one)',
-    columnCodes({ name: 'Exam', is_exam: 1, columns: [{ id: 'c0' }] }).join('') === 'E');
+  t('codes: everything is numbered — the exam included (E1, one rule, no exceptions)',
+    columnCodes({ name: 'Exam', is_exam: 1, columns: [{ id: 'c0' }] }).join('') === 'E1');
   t('codes: multi-word fallback → word initials (Machine Problem → MP)',
     assessmentCode({ name: 'Machine Problem' }) === 'MP');
   t('codes: single-word fallback → first two letters (Portfolio → PO)',
@@ -51,6 +56,19 @@ const t = (name, cond) => {
   const c1 = { id: 'c1' }, c2 = { id: 'c2' };
   t('codes: reordering columns renumbers (derived, nothing stored)',
     columnCodes(a, [c1, c2])[0] === 'Q1' && columnCodes(a, [c2, c1])[0] === 'Q1');
+
+  // Manual labels (v1.9.0): preserved forever, never shifting neighbors.
+  const cols = [{ id: 'c1', label: '' }, { id: 'c2', label: 'Long Quiz' }, { id: 'c3', label: '' }];
+  t('codes: a manual label overrides its own column only',
+    columnCodes(a, cols).join(' ') === 'Q1 Long Quiz Q3');
+  t('codes: automatic numbering stays positional around manual labels',
+    columnCodes(a, cols)[2] === 'Q3');
+  const info = columnCodeInfo(a, cols);
+  t('codes: info marks manual vs automatic', info[1].manual === true && info[0].manual === false);
+  t('codes: the tooltip long form is the actual assessment name ("Quiz 2"), never "automatic"',
+    columnLongName(a, 1) === 'Quiz 2' && info[1].long === 'Quiz 2');
+  t('codes: info carries the underlying auto code for edit round-trips', info[1].auto === 'Q2');
+  t('codes: whitespace-only labels stay automatic', columnCodes(a, [{ id: 'c1', label: '   ' }])[0] === 'Q1');
 }
 
 // ---- highlight config --------------------------------------------------------

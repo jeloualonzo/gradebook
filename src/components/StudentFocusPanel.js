@@ -69,6 +69,25 @@ export default function StudentFocusPanel({ student, subject, periods, scores, r
                         {a.entries.length > 0 ? `${a.weight > 0 ? ' · ' : ''}${a.entered} of ${a.entries.length}` : ''}
                       </span>
                     </div>
+                    {/* Workspace assessment (v1.9.0): one computed chip. */}
+                    {a.workspace && (
+                      <div className="mt-1">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[11px] border ${
+                            a.workspace.status === 'completed'
+                              ? 'bg-white border-gray-200 text-gray-700'
+                              : 'bg-gray-50 border-gray-200 text-gray-400'
+                          }`}
+                          title={a.workspace.status === 'completed'
+                            ? `${formatNumber(a.workspace.earned)} of ${formatNumber(a.workspace.max)}`
+                            : a.workspace.status === 'not_applicable' ? 'Completed in another period' : 'Expected — no score yet'}
+                        >
+                          {a.workspace.status === 'completed'
+                            ? formatNumber(a.workspace.earned)
+                            : a.workspace.status === 'not_applicable' ? 'N/A' : '—'}
+                        </span>
+                      </div>
+                    )}
                     {a.entries.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {a.entries.map(e => (

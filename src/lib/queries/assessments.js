@@ -49,14 +49,25 @@ export async function normalizeExamLast(periodId) {
   db.transaction(() => normalizeExamLastSync(periodId));
 }
 
-export async function createAssessment(periodId, { name, is_exam = 0, sort_order = 0, weight_percent = 0, skip_auto_column = false }) {
+export async function createAssessment(periodId, {
+  name, is_exam = 0, sort_order = 0, weight_percent = 0, skip_auto_column = false,
+  // Workspace assessments (v1.9.0): behavior/span/aggregation are set at
+  // creation. span is IMMUTABLE afterwards (changing it would silently
+  // reshuffle where existing scores count); method/target stay editable.
+  behavior = 'columns', span = 'period', agg_method = 'sum', agg_max = null,
+  initial_max = null,
+}) {
   const id = db.newId();
   const now = db.now();
   db.transaction(() => {
     db.run(
-      `INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, periodId, name, is_exam ? 1 : 0, sort_order, weight_percent, now, now]
+      `INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, behavior, span, agg_method, agg_max, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, periodId, name, is_exam ? 1 : 0, sort_order, weight_percent,
+        behavior === 'workspace' ? 'workspace' : 'columns',
+        span === 'term' ? 'term' : 'period',
+        ['sum', 'sum_capped', 'average'].includes(agg_method) ? agg_method : 'sum',
+        agg_max ?? null, now, now]
     );
     // Every exam automatically gets exactly one date column (date is picked
     // by the instructor later; it shows as "--" until then).
@@ -67,16 +78,31 @@ export async function createAssessment(periodId, { name, is_exam = 0, sort_order
         [db.newId(), id, 100, now, now]
       );
     }
+    // Term-span workspace: one detail bucket per grading period, created
+    // eagerly so the workspace always has a column to write into. Undated;
+    // ordered PRELIM → MIDTERM → FINAL via sort_order.
+    if (behavior === 'workspace' && span === 'term') {
+      const types = ['PRELIM', 'MIDTERM', 'FINAL'];
+      for (let i = 0; i < types.length; i++) {
+        db.run(
+          `INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, period_type, label, created_at, updated_at)
+           VALUES (?, ?, NULL, ?, ?, ?, '', ?, ?)`,
+          [db.newId(), id, initial_max ?? 100, i, types[i], now, now]
+        );
+      }
+    }
   });
   return id;
 }
 
-export async function updateAssessment(id, { name, sort_order, weight_percent }) {
+export async function updateAssessment(id, { name, sort_order, weight_percent, agg_method, agg_max }) {
   // Guarded write (db.updateRow): unchanged values never re-stamp updated_at.
   const fields = {};
   if (name !== undefined) fields.name = name;
   if (sort_order !== undefined) fields.sort_order = sort_order;
   if (weight_percent !== undefined) fields.weight_percent = weight_percent;
+  if (agg_method !== undefined && ['sum', 'sum_capped', 'average'].includes(agg_method)) fields.agg_method = agg_method;
+  if (agg_max !== undefined) fields.agg_max = agg_max;
   if (Object.keys(fields).length === 0) return;
   db.updateRow('assessments', id, fields);
 }
@@ -127,7 +153,7 @@ export async function getColumnsByAssessment(assessmentId) {
   );
 }
 
-export async function createColumn(assessmentId, { date = null, max_score = 100, dedupe_by_date = false }) {
+export async function createColumn(assessmentId, { date = null, max_score = 100, dedupe_by_date = false, period_type = null, label = '' }) {
   // Used by Quick Attendance: never create a second column for the same
   // date — reuse the existing one instead.
   if (dedupe_by_date && date) {
@@ -144,14 +170,14 @@ export async function createColumn(assessmentId, { date = null, max_score = 100,
   const id = db.newId();
   const now = db.now();
   db.run(
-    `INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [id, assessmentId, date, max_score, cnt, now, now]
+    `INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, period_type, label, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, assessmentId, date, max_score, cnt, period_type, String(label ?? ''), now, now]
   );
   return id;
 }
 
-export async function updateColumn(id, { date, max_score, attendance_source }) {
+export async function updateColumn(id, { date, max_score, attendance_source, label }) {
   // Guarded write (db.updateRow): the attendance page re-PUTs max_score on
   // EVERY re-save of an existing date — unchanged values must not re-stamp
   // updated_at (that no-op churn produced identical-content conflict entries
@@ -160,6 +186,7 @@ export async function updateColumn(id, { date, max_score, attendance_source }) {
   if (date !== undefined) fields.date = date;
   if (max_score !== undefined) fields.max_score = max_score;
   if (attendance_source !== undefined) fields.attendance_source = attendance_source ? 1 : 0;
+  if (label !== undefined) fields.label = String(label ?? '').trim(); // '' = back to the automatic code
   if (Object.keys(fields).length === 0) return;
   db.updateRow('assessment_columns', id, fields);
 }

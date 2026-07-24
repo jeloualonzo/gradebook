@@ -1,5 +1,13 @@
+import { isWorkspace, workspaceAggregate } from './workspace.js';
+
 /**
  * Computes the weighted average grade for a single grading period.
+ *
+ * Categories with no data FOR THIS STUDENT drop out and the remaining
+ * weights renormalize (per-student). Workspace assessments (v1.9.0)
+ * contribute their configured aggregation instead of raw column math —
+ * pass PROJECTED periods (src/lib/workspace.js projectPeriods) so a
+ * term-span assessment's columns are already scoped to this period.
  *
  * @param {Array} assessments - assessments for the period, each with:
  *   { id, weight_percent, columns: [{ id, max_score }] }
@@ -21,13 +29,23 @@ export function computePeriodGrade(assessments, scores, studentId) {
     let totalScore = 0;
     let totalMax = 0;
 
-    for (const col of columns) {
-      const raw = scores?.[col.id]?.[studentId];
-      const val = raw !== undefined && raw !== null && raw !== '' ? parseFloat(raw) : null;
-      const max = parseFloat(col.max_score) || 0;
-      if (max > 0 && val !== null) {
-        totalScore += val;
-        totalMax += max;
+    if (isWorkspace(assessment)) {
+      // One code path for every workspace method ('sum' is byte-identical
+      // to the classic math below). null = no contribution for this
+      // student here (Expected / N/A) — the category renormalizes away.
+      const agg = workspaceAggregate(assessment, scores, studentId);
+      if (!agg || !(agg.max > 0)) continue;
+      totalScore = agg.earned;
+      totalMax = agg.max;
+    } else {
+      for (const col of columns) {
+        const raw = scores?.[col.id]?.[studentId];
+        const val = raw !== undefined && raw !== null && raw !== '' ? parseFloat(raw) : null;
+        const max = parseFloat(col.max_score) || 0;
+        if (max > 0 && val !== null) {
+          totalScore += val;
+          totalMax += max;
+        }
       }
     }
 

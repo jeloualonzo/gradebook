@@ -37,7 +37,9 @@ export const FORMAT_VERSION = 1;
 //   v4: attendance_source on assessment_columns (score ⇒ auto-Present)
 //   v5: subject_code on subjects
 //   v6: notes table (free-form annotations on columns/cells; student/subject ready)
-export const SCHEMA_VERSION = 6;
+//   v7: workspace assessments (behavior/span/agg_method/agg_max on assessments;
+//       period_type/label on assessment_columns)
+export const SCHEMA_VERSION = 7;
 
 // Parents strictly before children (foreign-key safe application order).
 // `naturalKey` marks tables whose rows have an identity beyond their UUID —
@@ -62,12 +64,13 @@ export const SYNCED_TABLES = [
   },
   {
     name: 'assessments',
-    columns: ['id', 'period_id', 'name', 'is_exam', 'sort_order', 'weight_percent', 'created_at', 'updated_at', 'deleted_at'],
+    columns: ['id', 'period_id', 'name', 'is_exam', 'sort_order', 'weight_percent', 'behavior', 'span', 'agg_method', 'agg_max', 'created_at', 'updated_at', 'deleted_at'],
+    defaults: { behavior: 'columns', span: 'period', agg_method: 'sum' },
   },
   {
     name: 'assessment_columns',
-    columns: ['id', 'assessment_id', 'date', 'max_score', 'attendance_source', 'sort_order', 'created_at', 'updated_at', 'deleted_at'],
-    defaults: { attendance_source: 0 },
+    columns: ['id', 'assessment_id', 'date', 'max_score', 'attendance_source', 'sort_order', 'period_type', 'label', 'created_at', 'updated_at', 'deleted_at'],
+    defaults: { attendance_source: 0, label: '' },
   },
   {
     name: 'scores',

@@ -161,6 +161,47 @@ export async function purgeSubject(id) {
  * exactly like any newly created subject; grading_periods' natural keys are
  * fresh because the subject id is.
  */
+
+/**
+ * Copy ONE assessment's STRUCTURE into a new period (rollover + duplicate):
+ * name/weight/order plus the v1.9.0 workspace configuration travel; the exam
+ * invariant (exactly one undated column) and a term-span workspace's three
+ * period buckets (source max, no scores) are recreated fresh. Sessions and
+ * dated columns never travel — dates belong to the old term.
+ */
+function copyAssessmentStructure(assessment, newPeriodId, now) {
+  const newAssessmentId = db.newId();
+  db.run(
+    `INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, behavior, span, agg_method, agg_max, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [newAssessmentId, newPeriodId, assessment.name, assessment.is_exam, assessment.sort_order, assessment.weight_percent,
+      assessment.behavior || 'columns', assessment.span || 'period', assessment.agg_method || 'sum', assessment.agg_max ?? null, now, now]
+  );
+  // The invariant: every exam has exactly one (undated) column.
+  if (assessment.is_exam) {
+    db.run(
+      'INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, created_at, updated_at) VALUES (?, ?, NULL, ?, 0, ?, ?)',
+      [db.newId(), newAssessmentId, 100, now, now]
+    );
+  }
+  // Term-span workspaces always carry one bucket per grading period.
+  if (assessment.behavior === 'workspace' && assessment.span === 'term') {
+    const srcBucket = db.get(
+      'SELECT max_score FROM assessment_columns WHERE assessment_id = ? AND deleted_at IS NULL AND period_type IS NOT NULL LIMIT 1',
+      [assessment.id]
+    );
+    const types = ['PRELIM', 'MIDTERM', 'FINAL'];
+    for (let i = 0; i < types.length; i++) {
+      db.run(
+        `INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, period_type, label, created_at, updated_at)
+         VALUES (?, ?, NULL, ?, ?, ?, '', ?, ?)`,
+        [db.newId(), newAssessmentId, srcBucket?.max_score ?? 100, i, types[i], now, now]
+      );
+    }
+  }
+  return newAssessmentId;
+}
+
 export async function rolloverSubject(id, {
   name, subject_code = '', section, school_year, semester,
   roster = 'empty', group_id = null,
@@ -198,18 +239,7 @@ export async function rolloverSubject(id, {
         [period.id]
       );
       for (const assessment of assessments) {
-        const newAssessmentId = db.newId();
-        db.run(
-          'INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [newAssessmentId, newPeriodId, assessment.name, assessment.is_exam, assessment.sort_order, assessment.weight_percent, now, now]
-        );
-        // The invariant: every exam has exactly one (undated) column.
-        if (assessment.is_exam) {
-          db.run(
-            'INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, created_at, updated_at) VALUES (?, ?, NULL, ?, 0, ?, ?)',
-            [db.newId(), newAssessmentId, 100, now, now]
-          );
-        }
+        copyAssessmentStructure(assessment, newPeriodId, now);
       }
     }
 
@@ -276,18 +306,7 @@ export async function duplicateSubject(id) {
         [period.id]
       );
       for (const assessment of assessments) {
-        const newAssessmentId = db.newId();
-        db.run(
-          'INSERT INTO assessments (id, period_id, name, is_exam, sort_order, weight_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [newAssessmentId, newPeriodId, assessment.name, assessment.is_exam, assessment.sort_order, assessment.weight_percent, now, now]
-        );
-        // Keep the invariant: every exam has exactly one date column.
-        if (assessment.is_exam) {
-          db.run(
-            'INSERT INTO assessment_columns (id, assessment_id, date, max_score, sort_order, created_at, updated_at) VALUES (?, ?, NULL, ?, 0, ?, ?)',
-            [db.newId(), newAssessmentId, 100, now, now]
-          );
-        }
+        copyAssessmentStructure(assessment, newPeriodId, now);
       }
     }
   });

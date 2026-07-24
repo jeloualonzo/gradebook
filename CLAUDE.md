@@ -153,7 +153,7 @@ full understanding. Preferences, consistently demonstrated:
 ## Current roadmap
 
 **Completed (shipped, verified):**
-- MySQL → SQLite migration; versioned, concurrency-safe schema migrations (v8)
+- MySQL → SQLite migration; versioned, concurrency-safe schema migrations (v9)
 - Electron desktop shell: splash, window-state + zoom persistence, single
   instance, backups on launch, 90s cold-start tolerance
 - Offline sync: full-state snapshots, LWW merge, natural-key twin adoption,
@@ -177,15 +177,41 @@ full understanding. Preferences, consistently demonstrated:
 - Desktop conventions batch: dialogs (focus trap, Enter/Esc), keyboard context
   menus, dynamic window titles, Ctrl+S flush, F2 rename, Home/End, custom
   scrollbars, subtitle cleanup
-- Permanent test suites: 59 engine + 48 grid-selection + 48 formatting +
-  71 scenario + 25 class-stats + 14 recycle + 55 workflow + 34 window-state;
-  `no-undef` lint (caught a real shipped bug)
+- Permanent test suites: 66 engine + 48 grid-selection + 57 formatting +
+  36 workspace + 77 scenario + 25 class-stats + 14 recycle + 64 workflow +
+  34 window-state; `no-undef` lint (caught a real shipped bug)
 - Semantic conflict review + centralized no-op write guards (v1.0.9): the
   log only surfaces real data divergence (`sync/review.mjs`); saves that
   change nothing no longer stamp `updated_at` (`db.updateRow` + upsert
   guards), which also removed an LWW hazard where a ritual re-save could
   beat a real unseen edit. Release publishing survives slow uploads
   (streamed `node:https`, adopt-if-landed, retry)
+- WORKSPACE ASSESSMENTS (v1.9.0) — the permanent foundation for complex
+  assessment workflows, architecture-reviewed and owner-refined before a
+  line was written. One computed column in the grid; details in a
+  dedicated workspace page with its own toolbar (search · status filters ·
+  summary panel · settings · undo). REUSES assessments/assessment_columns/
+  scores wholesale (sync, autosave, undo, notes, conflict review all free)
+  — a behavior flag + aggregation config + one pure module
+  (src/lib/workspace.js), never a parallel data universe. Two archetypes,
+  one model: 'period' span (Oral Participation: recitation sessions) and
+  'term' span (Reporting/Defense/Speech: one master record, three period
+  buckets, PURE projection into every band — a score counts where it was
+  earned, no copying ever). Aggregation in teacher language (Total points /
+  Point bank / Average of sessions), per-template defaults, NEVER
+  class-relative (a best-student max is structurally impossible).
+  Statuses DERIVED never stored — Completed / Expected / N/A (owner's
+  terminology): N/A never highlights, never counts missing, contributes
+  null and renormalizes away per student (the calculator already did
+  per-student renormalization — the design fell out of reading it).
+  Rollover carries workspace config + fresh buckets. Exports show the
+  computed column. Second snapshot bump ceremony (DB v8→v9, snapshot
+  v6→v7). PLUS the short-code redesign: codes row = true AssessmentBlock
+  header mode (identical styling/editing to the dates row), manual labels
+  via assessment_columns.label (auto code typed back = stays automatic;
+  neighbors never renumber), tooltips say "Quiz 3" not "automatic", and
+  the A/ACT/AS convention (Attendance=A, Activity=ACT, everything
+  numbered incl. E1)
 - Notes, coloring, codes + the focus-jump root fix (v1.8.0): the Modal
   focus-trap defect diagnosed at the root (its effect re-ran on every
   parent render because `onClose` — a fresh arrow — was a dependency, and

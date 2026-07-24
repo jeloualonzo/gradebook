@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
+import { projectPeriods, isWorkspace, workspaceAggregate, workspaceStatus } from '@/lib/workspace';
 import { formatDateMMDDYYYY } from '@/lib/dateUtils';
 import { displayName } from '@/lib/names';
 import { getSubjectById } from '@/lib/queries/subjects';
@@ -33,7 +34,11 @@ export async function GET(request, { params }) {
     const resolvedParams = await params;
     const data = await loadSubjectData(resolvedParams.id);
     if (!data) return Response.json({ error: 'Not found' }, { status: 404 });
-    const { subject, students, periods, scores } = data;
+    const { subject, students, scores } = data;
+    // Workspace-aware view (v1.9.0): the export shows ONE computed column
+    // per workspace assessment — exactly like the grid — and term-span
+    // scores count in the period where they were earned.
+    const periods = projectPeriods(data.periods);
 
     const workbook = new ExcelJS.Workbook();
     const ws = workbook.addWorksheet(`${subject.name} - ${subject.section}`);
@@ -45,6 +50,10 @@ export async function GET(request, { params }) {
     const headers = ['#', 'Student Name'];
     for (const period of periods) {
       for (const a of period.assessments) {
+        if (isWorkspace(a)) {
+          headers.push(`${period.type} - ${a.name}\n(workspace)`);
+          continue;
+        }
         for (const col of a.columns) {
           headers.push(`${period.type} - ${a.is_exam ? 'Exam' : a.name}\n${col.date ? formatDateMMDDYYYY(col.date) : '--'}`);
         }
@@ -63,6 +72,12 @@ export async function GET(request, { params }) {
       const periodGrades = {};
       for (const period of periods) {
         for (const a of period.assessments) {
+          if (isWorkspace(a)) {
+            const status = workspaceStatus(a, scores, String(student.id), period.type);
+            const agg = workspaceAggregate(a, scores, String(student.id));
+            row.push(status === 'not_applicable' ? 'N/A' : agg ? parseFloat(parseFloat(agg.earned).toFixed(2)) : '');
+            continue;
+          }
           for (const col of a.columns) {
             const v = scores[col.id]?.[student.id];
             row.push(v !== undefined && v !== null ? parseFloat(v) : '');

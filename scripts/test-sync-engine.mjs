@@ -117,7 +117,7 @@ const applyDecisions = (state, decisions) => {
   const stateA = emptyState();
   stateA.subjects = [subj()];
   stateA.grading_periods = [{ id: 'p1', subject_id: 's1', type: 'PRELIM', created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null }];
-  stateA.assessments = [{ id: 'a1', period_id: 'p1', name: 'Quiz', is_exam: 0, sort_order: 0, weight_percent: 50, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-05T00:00:00.000Z', deleted_at: null }];
+  stateA.assessments = [{ id: 'a1', period_id: 'p1', name: 'Quiz', is_exam: 0, sort_order: 0, weight_percent: 50, behavior: 'columns', span: 'period', agg_method: 'sum', agg_max: null, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-05T00:00:00.000Z', deleted_at: null }];
   stateA.student_groups = [{ id: 'g1', name: 'BSIS 2A', description: '', owner_device_id: A, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z', deleted_at: null, purged_at: null, deleted_by_device_id: null }];
 
   const stateB = emptyState();
@@ -292,7 +292,7 @@ const cellRow = (over = {}) => ({
     body: 'absent — makeup on Friday', created_at: T0, updated_at: T0, deleted_at: null, ...over,
   });
 
-  t('notes: snapshot schema version bumped to 6 for the notes table', SCHEMA_VERSION === 6);
+  t('notes: snapshot schema version at least 6 (notes table bump)', SCHEMA_VERSION >= 6);
   t('notes: registered with the entity natural key',
     !!NOTES && NOTES.naturalKey.join('|') === 'entity_type|entity_id');
   t('notes: natural key is entity_type + entity_id',
@@ -330,6 +330,46 @@ const cellRow = (over = {}) => ({
     semanticallyEqual(NOTES, note(), note({ id: 'n-other', created_at: T1, updated_at: T1 })));
   t('review: deleted vs active note is a real conflict',
     !semanticallyEqual(NOTES, note({ deleted_at: T1 }), note()));
+}
+
+// ---- 10. workspace assessments (snapshot v7) ---------------------------------
+{
+  const ASSESSMENTS = SYNCED_TABLES.find(x => x.name === 'assessments');
+  const COLUMNS = SYNCED_TABLES.find(x => x.name === 'assessment_columns');
+  const T0 = '2026-07-01T00:00:00.000Z';
+  const T1 = '2026-07-02T00:00:00.000Z';
+  const wsA = (over = {}) => ({
+    id: 'ws1', period_id: 'p1', name: 'Oral Participation', is_exam: 0, sort_order: 1,
+    weight_percent: 10, behavior: 'workspace', span: 'period', agg_method: 'sum_capped',
+    agg_max: 30, created_at: T0, updated_at: T0, deleted_at: null, ...over,
+  });
+  const bucket = (over = {}) => ({
+    id: 'b1', assessment_id: 'ws1', date: null, max_score: 50, attendance_source: 0,
+    sort_order: 0, period_type: 'PRELIM', label: '', created_at: T0, updated_at: T0, deleted_at: null, ...over,
+  });
+
+  t('workspace: snapshot schema version bumped to 7', SCHEMA_VERSION === 7);
+  {
+    // A v6 snapshot's assessment rows predate the workspace fields — they
+    // must import as ordinary column assessments, never null into NOT NULL.
+    const old = { id: 'a9', period_id: 'p1', name: 'Quiz', is_exam: 0, sort_order: 0, weight_percent: 20, created_at: T0, updated_at: T0, deleted_at: null };
+    const d = mergeTable(ASSESSMENTS, [], [old], ctxOnA);
+    t('workspace: v6 assessments import with behavior=columns, span=period, method=sum',
+      d.inserts.length === 1 && d.inserts[0].behavior === 'columns' &&
+      d.inserts[0].span === 'period' && d.inserts[0].agg_method === 'sum' && d.inserts[0].agg_max === null);
+    const oldCol = { id: 'c9', assessment_id: 'a9', date: '2026-07-01', max_score: 10, attendance_source: 0, sort_order: 0, created_at: T0, updated_at: T0, deleted_at: null };
+    const dc = mergeTable(COLUMNS, [], [oldCol], ctxOnA);
+    t('workspace: v6 columns import with an empty label and no period tag',
+      dc.inserts.length === 1 && dc.inserts[0].label === '' && dc.inserts[0].period_type === null);
+  }
+  t('review: aggregation method change is a real conflict',
+    !semanticallyEqual(ASSESSMENTS, wsA({ agg_method: 'average', updated_at: T1 }), wsA()));
+  t('review: target total change is a real conflict',
+    !semanticallyEqual(ASSESSMENTS, wsA({ agg_max: 50, updated_at: T1 }), wsA()));
+  t('review: a manual column label change is a real conflict',
+    !semanticallyEqual(COLUMNS, bucket({ label: 'Long Quiz', updated_at: T1 }), bucket()));
+  t('review: identical workspace rows differing only in timestamps are not reviewable',
+    semanticallyEqual(ASSESSMENTS, wsA(), wsA({ updated_at: T1 })));
 }
 
 console.log(failures === 0 ? '\nALL ENGINE TESTS PASSED' : `\n${failures} FAILURES`);

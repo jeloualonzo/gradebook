@@ -186,17 +186,22 @@ professional desktop feel over adding features.
 
 **Owner-directed batches outside the phase sequence:** v1.7.1 (three-level
 recovery model, retroactive counts-as-attendance, dock-aware layout, SemVer
-adopted) · v1.7.2 (two-mode cells, custom dock thumb) · **v1.8.0** (Modal
+adopted) · v1.7.2 (two-mode cells, custom dock thumb) · v1.8.0 (Modal
 focus-trap root fix; configurable cell-coloring rules with priority
 reordering; automatic assessment short codes; synced free-form NOTES on
 date columns + score cells — the first snapshot-version bump, DB v8 /
-snapshot v6; notes data model already carries student/subject levels and is
-Search-Notes-ready).
+snapshot v6) · **v1.9.0** (WORKSPACE ASSESSMENTS — one computed column in
+the grid, details in a dedicated workspace page; Oral Participation
+sessions + term-spanning Reporting with automatic per-period projection
+and Expected/Completed/N-A statuses; teacher-language aggregation with
+per-template defaults; short-code redesign with manual labels; second
+snapshot bump, DB v9 / snapshot v7 — the reusable foundation for Defense,
+Demonstration, Seminar, Speech, and Performance Task workflows).
 
-One phase per fully-verified release cycle: eslint → engine (59) →
-formatting (48) → grid-selection (48) → class-stats (25) → scenario lab
-(71) → recycle (14) → workflows (55) → window-state (34) → `--no-pack` →
-push → blob-SHA check → `desktop:release`.
+One phase per fully-verified release cycle: eslint → engine (66) →
+formatting (57) → workspace (36) → grid-selection (48) → class-stats (25)
+→ scenario lab (77) → recycle (14) → workflows (64) → window-state (34) →
+`--no-pack` → push → blob-SHA check → `desktop:release`.
 
 ## Appendix C — Design-review Top 20 (2026-07-10, compact)
 

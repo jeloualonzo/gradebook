@@ -329,5 +329,80 @@ check('F9: re-adding after delete revives one note (undo round-trip contract)',
   noteFor(revived, 'cell', cellKey)?.body === 'second thoughts' &&
   revived.filter(x => x.entity_type === 'cell' && x.entity_id === cellKey).length === 1);
 
+// ============ Feature 10: workspace assessments (v1.9.0) ============
+// One computed column in the grid, details in a workspace — data-model level:
+// creation templates, term buckets, config edits, labels, rollover structure.
+const colsOf = async (subjId, assessmentId) => {
+  const ps = await must('GET', `/api/subjects/${subjId}/periods`);
+  for (const pp of ps) {
+    const a = (pp.assessments || []).find(x => x.id === assessmentId);
+    if (a) return a.columns || [];
+  }
+  return [];
+};
+const W = await mkSubject('Workspace 101');
+const wPeriods = await must('GET', `/api/subjects/${W}/periods`);
+const wPrelim = wPeriods.find(p => p.type === 'PRELIM');
+
+// Session-span workspace (Oral): point bank of 30.
+const oralId = (await must('POST', `/api/periods/${wPrelim.id}/assessments`, {
+  name: 'Oral Participation', is_exam: 0, weight_percent: 10,
+  behavior: 'workspace', span: 'period', agg_method: 'sum_capped', agg_max: 30,
+})).id;
+// Term-span workspace (Reporting): three auto-created period buckets, max 50.
+const repId = (await must('POST', `/api/periods/${wPrelim.id}/assessments`, {
+  name: 'Reporting', is_exam: 0, weight_percent: 20,
+  behavior: 'workspace', span: 'term', agg_method: 'sum', initial_max: 50,
+})).id;
+
+const wAssess = async (id) => (await must('GET', `/api/periods/${wPrelim.id}/assessments`)).find(a => a.id === id);
+const oralRow = await wAssess(oralId);
+check('F10: workspace config persists (behavior/span/method/target)',
+  oralRow.behavior === 'workspace' && oralRow.span === 'period' &&
+  oralRow.agg_method === 'sum_capped' && String(oralRow.agg_max) === '30');
+const repCols = await colsOf(W, repId);
+check('F10: term-span creation auto-made one bucket per grading period (max carried)',
+  repCols.length === 3 &&
+  ['PRELIM', 'MIDTERM', 'FINAL'].every(pt => repCols.some(c => c.period_type === pt && String(c.max_score) === '50')) &&
+  repCols.every(c => c.date === null));
+
+// Config edits (method/target) are ordinary guarded updates.
+await must('PUT', `/api/assessments/${oralId}`, { agg_method: 'average', agg_max: 40 });
+const oralRow2 = await wAssess(oralId);
+check('F10: computation settings are editable', oralRow2.agg_method === 'average' && String(oralRow2.agg_max) === '40');
+
+// Session columns carry labels (titles); label='' returns to automatic.
+const sess = (await must('POST', `/api/assessments/${oralId}/columns`, { date: '2026-08-05', max_score: 10, label: 'Recitation — Ch. 1' })).id;
+let sessCols = await colsOf(W, oralId);
+check('F10: session labels round-trip', sessCols.find(c => c.id === sess)?.label === 'Recitation — Ch. 1');
+await must('PUT', `/api/columns/${sess}`, { label: '' });
+sessCols = await colsOf(W, oralId);
+check('F10: clearing a label returns the column to automatic naming', sessCols.find(c => c.id === sess)?.label === '');
+
+// Scores in buckets/sessions are ordinary score rows.
+const wStu = (await add(W, 'Velasco', 'Rita')).id;
+const midBucket = repCols.find(c => c.period_type === 'MIDTERM');
+await must('PUT', `/api/scores/${midBucket.id}/${wStu}`, { value: 45 });
+check('F10: a bucket score lands like any other score', cell(await scoresOf(W), midBucket.id, wStu) === 45);
+
+// Rollover: workspace STRUCTURE travels (config + fresh buckets), scores never.
+const wRoll = await must('POST', `/api/subjects/${W}/rollover`, {
+  name: 'Workspace 102', section: 'X', school_year: '2026-2027', semester: '2nd', roster: 'empty',
+});
+const rollPeriods = await must('GET', `/api/subjects/${wRoll.id}/periods`);
+const rollPrelim = rollPeriods.find(p => p.type === 'PRELIM');
+const rollAssessments = await must('GET', `/api/periods/${rollPrelim.id}/assessments`);
+const rollRep = rollAssessments.find(a => a.name === 'Reporting');
+const rollOral = rollAssessments.find(a => a.name === 'Oral Participation');
+check('F10: rollover carries the workspace config',
+  rollRep?.behavior === 'workspace' && rollRep?.span === 'term' &&
+  rollOral?.behavior === 'workspace' && rollOral?.agg_method === 'average' && String(rollOral?.agg_max) === '40');
+const rollRepCols = await colsOf(wRoll.id, rollRep.id);
+check('F10: rollover recreates fresh term buckets (source max, no scores)',
+  rollRepCols.length === 3 && rollRepCols.every(c => String(c.max_score) === '50') &&
+  Object.keys(await scoresOf(wRoll.id)).length === 0);
+const rollOralCols = await colsOf(wRoll.id, rollOral.id);
+check('F10: rollover never carries dated sessions', rollOralCols.length === 0);
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL WORKFLOW TESTS PASSED');
 process.exit(failures ? 1 : 0);

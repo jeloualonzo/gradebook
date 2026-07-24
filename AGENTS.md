@@ -122,13 +122,15 @@ Storage layout under `%APPDATA%/Gradebook/`:
 **Never confuse these:**
 
 1. **Database version** — `PRAGMA user_version`, `SCHEMA_VERSION` in
-   `migrations.js` (currently **8**). Bumps whenever any table changes,
+   `migrations.js` (currently **9**). Bumps whenever any table changes,
    including local-only tables.
 2. **Snapshot compatibility version** — `SCHEMA_VERSION` in
-   `sync/engine.mjs` (currently **6**). Bumps ONLY when the shape of
+   `sync/engine.mjs` (currently **7**). Bumps ONLY when the shape of
    `SYNCED_TABLES` changes. Local-only tables (e.g. `sync_conflicts`) never
    touch it. A device refuses snapshots from a NEWER snapshot version and asks
    to be updated; older snapshots import fine via per-column `defaults`.
+   (v9/v7 — v1.9.0 workspace assessments — followed the same ceremony:
+   new-COLUMN defaults on two tables instead of a new table.)
 
 **The v8/v6 bump (v1.8.0, notes) is the reference example** of the full
 ceremony for new synced data: migration step 8 (guarded CREATE TABLE) +
@@ -141,7 +143,7 @@ release the not-yet-updated laptop pauses IMPORTING the updated laptop's
 snapshots ("update this app") while its own exports still merge fine the
 other way — update both laptops promptly; nothing is lost in the window.
 
-Migration rules (enforced by convention, all steps 2→8 follow them):
+Migration rules (enforced by convention, all steps 2→9 follow them):
 - Additive only: `ALTER TABLE … ADD COLUMN`, `CREATE TABLE/INDEX IF NOT EXISTS`.
   Never drop user data.
 - New columns NULLable or with DEFAULT; guard with `PRAGMA table_info` checks
@@ -302,13 +304,14 @@ a test; UI polish is verified by lint + build + targeted SSR render harnesses.
 
 | Suite | What it proves | How |
 |---|---|---|
-| `test-sync-engine.mjs` (59) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict) and the notes table (v6 bump, entity natural key, missing-table snapshots) | Fixtures, no I/O |
+| `test-sync-engine.mjs` (66) | Pure merge semantics: LWW, ties, tombstones, natural-key twins, defaults for old snapshots, idempotence — plus review semantics (what is/isn't a reviewable conflict), the notes table (v6), and the workspace fields (v7: old-snapshot defaults, config/label conflicts) | Fixtures, no I/O |
 | `test-grid-selection.mjs` (48) | Pure selection model (anchors/extends/clamps, row/column/all, geometry-change collapse, stats math) + TSV clipboard (round-trips, Excel quirks, tile/block/clip shapes, token rules) + fill plans + dock scrollbar thumb metrics (native arithmetic, min clamp, endpoint mapping) | Fixtures, no I/O |
-| `test-formatting.mjs` (48) | Short codes (known abbreviations, fallbacks, exam E, order-derived renumbering) + highlight rules (registry/config normalization, per-kind resolution, cents-safe thresholds, first-match priority + reordering) | Fixtures, no I/O |
-| `test-sync-scenarios.mjs` (71) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12), notes over real sync (S14: propagation, LWW, one basis-scoped conflict, tombstoned deletes) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
+| `test-formatting.mjs` (57) | Short codes (v1.9.0 convention: A/ACT/AS disambiguation, everything numbered incl. E1, manual-label overrides that never shift neighbors, tooltip long forms) + highlight rules (registry/config normalization, per-kind resolution, cents-safe thresholds, first-match priority + reordering) | Fixtures, no I/O |
+| `test-workspace.mjs` (36) | Workspace assessments (v1.9.0): every aggregation method (point bank caps + honest zero, average, classic sum), Expected/Completed/N-A derivation (incl. from projected copies), term-span projection (band scoping, before-exam placement, purity), per-student renormalization through computePeriodGrade, summaries, templates | Fixtures, no I/O |
+| `test-sync-scenarios.mjs` (77) | Real two-laptop life: disjoint merges, same-cell conflict, late syncer, alternation convergence (byte-identical dumps), conflict log precision, recycle bin propagation, review/restore/details, semantic-only logging + no-op write guards (S12), notes over real sync (S14), workspace assessments over real sync (S15: config/buckets/scores propagate, LWW config conflicts read as "Target Total", labels sync) | TWO live app instances (ports 3131/3132) + real shared folder `/tmp/sync-lab/share` |
 | `test-class-stats.mjs` (25) | Period-closing semantics (active-column rule, fill-blanks scopes, footer math, thresholds, ranking) + term sequencing (rollover defaults) + the student-focus model (P/L/A letters via config, missing list, grade agreement with the calculator) | Fixtures, no I/O |
 | `test-recycle-bin.mjs` (14) | Restore/purge correctness | Live instance (3146) |
-| `test-workflows.mjs` (55) | Group-from-subject, move-column, counts-as-attendance (live + RETROACTIVE backfill: blanks-only, inert disable, idempotent re-enable), bulk attendance parity, semester rollover, remove-imported-group, students-batch remove/revive (same-rows undo contract, import returns created ids), notes CRUD (F9: independence from the score lifecycle, one-note-per-entity upserts, delete/revive round trip) | Live instance (3171) |
+| `test-workflows.mjs` (64) | Group-from-subject, move-column, counts-as-attendance (live + RETROACTIVE backfill), bulk attendance parity, semester rollover, remove-imported-group, students-batch remove/revive, notes CRUD (F9), workspace assessments (F10: template creation, auto term buckets, config edits, label round-trips, rollover carries config + fresh buckets, sessions never) | Live instance (3171) |
 | `test-window-state.mjs` (34) | Bounds sanitizing, zoom clamp/persist, full manage() lifecycle | Stub Electron window |
 
 Run the lab: build plain standalone, `mkdir -p /tmp/sync-lab/{a,b,share}`,
@@ -495,9 +498,9 @@ the remote blob SHA against local `git hash-object`.
   the missing rule's enabled flag; `gb-hide-missing` still retires
   chips/cues alongside. Settings → Cell Coloring is fully registry-driven.
   **Short codes** — `src/lib/shortCodes.js`, DERIVED at render from name +
-  column position (nothing stored, nothing synced; reordering renumbers by
-  construction); a toggleable fifth header row under the dates; exam reads
-  plain `E`.
+  column position (reordering renumbers by construction); a toggleable
+  fifth header row under the dates. Redesigned in v1.9.0 — see the v1.9.0
+  entry below for the current convention (A/ACT/AS, E1, manual labels).
   **Notes** — ONE polymorphic synced table (`notes`: entity_type/entity_id
   natural key; 'column', 'cell' = `columnId:studentId`, and
   'student'/'subject' reserved for future UI; `subject_id` denormalized so
@@ -509,6 +512,46 @@ the remote blob SHA against local `git hash-object`.
   indicator + hover tooltip rendered at the TD level (ScoreCell unchanged),
   one editor dialog (multiline, Ctrl+Enter saves), every write a Level-2
   history entry. The focus modal doesn't surface notes yet (documented).
+- v1.9.0, the load-bearing details:
+  **WORKSPACE ASSESSMENTS** — the permanent foundation for complex
+  assessment workflows. A workspace assessment is an ORDINARY assessment
+  (`behavior='workspace'`) whose detail columns are hidden from the grid
+  and managed in a dedicated page (`/subjects/[id]/workspace/[aid]`); the
+  grid shows ONE computed column. Details are plain assessment_columns +
+  scores — sync, autosave, undo, notes, and conflict review apply
+  unchanged. Two spans: 'period' (sessions, e.g. Oral) and 'term' (three
+  period buckets tagged `period_type`; ONE master record projected into
+  every band — a score counts in the period where it was earned, no
+  copying). `projectPeriods` (src/lib/workspace.js) is a PURE VIEW
+  transform used by the page + exports; raw rows stay the truth for
+  rollover/dnd (projected copies are `projected: true`, never draggable,
+  never persisted into a foreign period's sort order). Aggregation is
+  per-assessment config in teacher language — Total points / Point bank
+  (capped at agg_max; an empty bank is honestly 0 once scoring starts) /
+  Average of sessions — and NEVER class-relative: the max always comes
+  from configuration or the sessions' own maxes, structurally never from
+  the best student. Statuses are DERIVED, never stored: Completed /
+  Expected (scored nowhere; owns the amber cue in the stats footer +
+  workspace summary — NOT the missing rule) / N/A (scored in another
+  period; gray, no highlight, contributes null → per-student
+  renormalization in computePeriodGrade does the rest). Templates
+  (WORKSPACE_TEMPLATES) provide per-workflow defaults — future workflows
+  are template entries, not code. Creation via the period header's
+  right-click; span is immutable after creation. The workspace page has
+  its own toolbar (search · Expected/Completed/N-A filters · sessions or
+  period selector · settings) and summary panel, and reuses the SAME
+  ScoreCells in its own [data-grid-scope].
+  **Short codes, redesigned** — the codes row is a true AssessmentBlock
+  header mode with the dates row's exact presentation and editing pattern
+  (click-to-edit, blur-commit, Escape-cancel, undoable). Convention:
+  Q · A=Attendance (the most frequent category earns the bare letter) ·
+  ACT=Activity · AS=Assignment · SW · L · E · PT · P · R, everything
+  numbered (E1 included — one rule, no exceptions), fallback = word
+  initials. `assessment_columns.label` stores MANUAL names only: typing
+  the automatic code back (or clearing) saves '' and the column returns to
+  automatic positional sequencing; a manual label never shifts its
+  neighbors' numbers. Tooltips show the actual assessment name ("Quiz 3"),
+  never the word "automatic".
 - Quiet chrome: no page subtitles; the status bar hides inside the gradebook;
   hints are tiny gray text, not banners; accent tints are subtle
   (blue = active/hover, amber = attention/conflict, green = kept/success).
@@ -520,7 +563,7 @@ the remote blob SHA against local `git hash-object`.
 ## 13. Never change without discussion
 
 1. **`engine.mjs` merge semantics** — LWW key, tiebreak, natural keys,
-   tombstone rules, whole-row wins. The 71-check scenario lab is the contract.
+   tombstone rules, whole-row wins. The 77-check scenario lab is the contract.
 2. **`updated_at` semantics** — stamped by the editing device at edit time;
    merges preserve it; restores deliberately re-stamp (that's what makes a
    restore win). Nothing else may rewrite timestamps.
@@ -532,6 +575,10 @@ the remote blob SHA against local `git hash-object`.
 7. **`--publish never` + script-owned publishing.**
 8. **The data dir / sync folder separation** (`validateSyncFolder`).
 9. Migration rules: additive, guarded, single IMMEDIATE transaction.
+10. **Workspace aggregation + projection semantics** (`src/lib/workspace.js`)
+    — grade-bearing math (point-bank cap/zero rules, N/A renormalization,
+    band scoping). The 36-check workspace suite is the contract; and no
+    aggregation may ever read another student's scores.
 
 ## 14. Known limitations (accepted, documented)
 

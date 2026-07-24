@@ -1,4 +1,5 @@
 import { computePeriodGrade, computeFinalSubjectGrade } from '@/lib/gradeCalculator';
+import { projectPeriods } from '@/lib/workspace';
 import { displayName } from '@/lib/names';
 import { getSubjectById } from '@/lib/queries/subjects';
 import { getStudentsBySubject } from '@/lib/queries/students';
@@ -30,10 +31,13 @@ export async function GET(request, { params }) {
       scores[row.column_id][row.student_id] = row.value;
     }
 
+    // Workspace-aware view: term-span assessments project into every period
+    // band so their scores count where they were earned (v1.9.0).
+    const viewPeriods = projectPeriods(periods);
     const rows = students.map((student, idx) => {
       const periodGrades = {};
       const rowData = { no: idx + 1, name: displayName(student) };
-      for (const period of periods) {
+      for (const period of viewPeriods) {
         const grade = computePeriodGrade(period.assessments, scores, student.id);
         periodGrades[period.type] = grade;
         rowData[period.type] = grade !== null ? grade.toFixed(2) : '—';

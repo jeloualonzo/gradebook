@@ -555,5 +555,60 @@ await reviewAll();
   check('S14: sync stays healthy after the schema-v6 rounds', !status.folder_problem && status.peers.length === 1);
 }
 
+// ---------- S15: workspace assessments over sync (v1.9.0 — snapshot v7) -------
+// Workspace assessments are ordinary rows end-to-end: config + term buckets +
+// scores propagate whole, concurrent config edits resolve by LWW with ONE
+// basis-scoped conflict whose details read in teacher language.
+{
+const colsOf = async (port, assessmentId) => {
+    const ps = await must(port, 'GET', `/api/subjects/${subj}/periods`);
+    for (const pp of ps) {
+      const a = (pp.assessments || []).find(x => x.id === assessmentId);
+      if (a) return a.columns || [];
+    }
+    return [];
+  };
+  const prelimId = (await must(A, 'GET', `/api/subjects/${subj}/periods`)).find(p => p.type === 'PRELIM').id;
+  const rep = await must(A, 'POST', `/api/periods/${prelimId}/assessments`, {
+    name: 'Reporting', is_exam: 0, weight_percent: 20,
+    behavior: 'workspace', span: 'term', agg_method: 'sum', initial_max: 50,
+  });
+  const repColsA = await colsOf(A, rep.id);
+  const midBucket = repColsA.find(c => c.period_type === 'MIDTERM');
+  await must(A, 'PUT', `/api/scores/${midBucket.id}/${st[0]}`, { value: 44 });
+  await sync(A); await sync(B);
+  const repOnB = (await must(B, 'GET', `/api/periods/${prelimId}/assessments`)).find(a => a.id === rep.id);
+  const repColsB = await colsOf(B, rep.id);
+  check('S15: workspace config + term buckets + a bucket score propagate whole',
+    repOnB?.behavior === 'workspace' && repOnB.span === 'term' && String(repOnB.agg_max ?? '') === '' &&
+    repColsB.length === 3 && cell(await scores(B, subj), midBucket.id, st[0]) === 44);
+
+  // Concurrent config edit: target 40 on A, then 50 on B (newer).
+  await must(A, 'PUT', `/api/assessments/${rep.id}`, { agg_max: 40 });
+  await sleep(60);
+  await must(B, 'PUT', `/api/assessments/${rep.id}`, { agg_max: 50 });
+  await sync(A); await sync(B); await sync(A);
+  const aRow = (await must(A, 'GET', `/api/periods/${prelimId}/assessments`)).find(x => x.id === rep.id);
+  const bRow = (await must(B, 'GET', `/api/periods/${prelimId}/assessments`)).find(x => x.id === rep.id);
+  check('S15: concurrent target edits converge by LWW on both laptops',
+    String(aRow.agg_max) === '50' && String(bRow.agg_max) === '50');
+  const s15List = (await must(B, 'GET', '/api/sync/conflicts?unreviewedOnly=1')).conflicts;
+  check('S15: exactly one conflict, on the rejecting side', s15List.length === 1 && (await unrev(A)) === 0,
+    JSON.stringify(s15List.map(c => c.label)));
+  const det = await must(B, 'GET', `/api/sync/conflicts/${s15List[0].id}`);
+  const tt = det.comparison?.fields?.find(f => f.label === 'Target Total');
+  check('S15: conflict details read in teacher language (Target Total 40 → 50)',
+    !!tt && tt.changed === true && tt.before === '40' && tt.after === '50',
+    JSON.stringify(tt));
+  await reviewAll();
+
+  // Manual short-code labels (assessment_columns.label) are synced data.
+  await must(A, 'PUT', `/api/columns/${midBucket.id}`, { label: 'Sem Report' });
+  await sync(A); await sync(B);
+  const relabeled = (await colsOf(B, rep.id)).find(c => c.id === midBucket.id);
+  check('S15: manual column labels propagate', relabeled?.label === 'Sem Report');
+  check('S15: no stray conflicts from the workspace rounds', (await unrev(A)) === 0 && (await unrev(B)) === 0);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL SCENARIO TESTS PASSED');
 process.exit(failures ? 1 : 0);

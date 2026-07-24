@@ -25,7 +25,7 @@
  *     stay valid without a rewrite.
  */
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const MIGRATIONS = {
   // v2 — sync conflict audit log (local-only, never synced): every time a
@@ -126,6 +126,30 @@ export const MIGRATIONS = {
       );
       CREATE INDEX IF NOT EXISTS idx_notes_subject ON notes(subject_id);
     `);
+  },
+
+  // v9 — Workspace Assessments (one computed column in the grid, details in
+  // a dedicated workspace) + editable column labels. SYNCED columns on two
+  // tables → snapshot schema_version bumps alongside (engine.mjs, v6 → v7).
+  //   assessments.behavior    'columns' (classic) | 'workspace'
+  //   assessments.span        'period' | 'term' (term = projected into every
+  //                           period band; details tagged by period_type)
+  //   assessments.agg_method  'sum' | 'sum_capped' (point bank) | 'average'
+  //   assessments.agg_max     the configured target total (never derived
+  //                           from any student's performance)
+  //   assessment_columns.period_type  which grading period a term-span
+  //                                   detail column belongs to (else NULL)
+  //   assessment_columns.label        session title / manual short-code
+  //                                   override ('' = automatic code)
+  9: (db) => {
+    const acols = db.prepare('PRAGMA table_info(assessments)').all().map(c => c.name);
+    if (!acols.includes('behavior')) db.exec("ALTER TABLE assessments ADD COLUMN behavior TEXT NOT NULL DEFAULT 'columns'");
+    if (!acols.includes('span')) db.exec("ALTER TABLE assessments ADD COLUMN span TEXT NOT NULL DEFAULT 'period'");
+    if (!acols.includes('agg_method')) db.exec("ALTER TABLE assessments ADD COLUMN agg_method TEXT NOT NULL DEFAULT 'sum'");
+    if (!acols.includes('agg_max')) db.exec('ALTER TABLE assessments ADD COLUMN agg_max REAL');
+    const ccols = db.prepare('PRAGMA table_info(assessment_columns)').all().map(c => c.name);
+    if (!ccols.includes('period_type')) db.exec('ALTER TABLE assessment_columns ADD COLUMN period_type TEXT');
+    if (!ccols.includes('label')) db.exec("ALTER TABLE assessment_columns ADD COLUMN label TEXT NOT NULL DEFAULT ''");
   },
 };
 

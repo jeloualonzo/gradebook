@@ -384,7 +384,7 @@ function describeRow(tableName, row) {
       const ctx = periodSubject(row.period_id);
       return {
         label: `Assessment${ctx ? ` (${ctx.period} — ${ctx.subject})` : ''}`,
-        value: `${row.name}${row.weight_percent ? ` (${formatNumber(row.weight_percent)}%)` : ''}${row.deleted_at ? ' (deleted)' : ''}`,
+        value: `${row.name}${row.weight_percent ? ` (${formatNumber(row.weight_percent)}%)` : ''}${row.behavior === 'workspace' ? ' · workspace' : ''}${row.deleted_at ? ' (deleted)' : ''}`,
       };
     }
     case 'assessment_columns': {
@@ -394,7 +394,7 @@ function describeRow(tableName, row) {
           WHERE a.id = ?`, [row.assessment_id]);
       return {
         label: ctx ? `${ctx.is_exam ? 'Exam' : ctx.assessment} date column (${ctx.period} — ${ctx.subject})` : 'Assessment column',
-        value: `${row.date || 'no date'} · max ${formatNumber(row.max_score)}${row.attendance_source ? ' · counts as attendance' : ''}${row.deleted_at ? ' (deleted)' : ''}`,
+        value: `${row.label ? `"${row.label}" · ` : ''}${row.date || (row.period_type ? row.period_type : 'no date')} · max ${formatNumber(row.max_score)}${row.attendance_source ? ' · counts as attendance' : ''}${row.deleted_at ? ' (deleted)' : ''}`,
       };
     }
     case 'attendance_config': {
@@ -695,6 +695,8 @@ export function conflictDetails(conflictId) {
       push('Assessment', meta && (meta.is_exam ? 'Exam' : meta.assessment));
       comparison = fieldComparison([
         ['date', 'Date', longDate],
+        ['label', 'Column Name'],
+        ['period_type', 'Grading Period'],
         ['max_score', 'Max Score', formatNumber],
         ['attendance_source', 'Counts as Attendance', yn],
         ['sort_order', 'Position', pos],
@@ -732,6 +734,11 @@ export function conflictDetails(conflictId) {
       comparison = fieldComparison([
         ['name', 'Assessment Name'],
         ['weight_percent', 'Weight %', formatNumber],
+        // Workspace configuration (v1.9.0) — shown in teacher language.
+        ['behavior', 'Type', (v) => (v === 'workspace' ? 'Workspace' : v ? 'Regular' : v)],
+        ['span', 'Covers', (v) => (v === 'term' ? 'Whole term' : v === 'period' ? 'One grading period' : v)],
+        ['agg_method', 'Computation', (v) => ({ sum: 'Total points', sum_capped: 'Point bank', average: 'Average of sessions' }[v] || v)],
+        ['agg_max', 'Target Total', formatNumber],
         ['sort_order', 'Position', pos],
       ]);
       break;

@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS assessments (
   is_exam INTEGER NOT NULL DEFAULT 0,
   sort_order INTEGER NOT NULL DEFAULT 0,
   weight_percent REAL NOT NULL DEFAULT 0,
+  behavior TEXT NOT NULL DEFAULT 'columns',  -- 'columns' (classic) | 'workspace' (one computed column, details in a workspace) (schema v9)
+  span TEXT NOT NULL DEFAULT 'period',       -- 'period' | 'term' (term-span projects into every period band)
+  agg_method TEXT NOT NULL DEFAULT 'sum',    -- how detail columns aggregate: 'sum' | 'sum_capped' | 'average'
+  agg_max REAL,                              -- configured target total (never derived from student performance)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT
@@ -90,6 +94,8 @@ CREATE TABLE IF NOT EXISTS assessment_columns (
   max_score REAL NOT NULL DEFAULT 100,
   attendance_source INTEGER NOT NULL DEFAULT 0,  -- scoring this date auto-marks Present in Attendance
   sort_order INTEGER NOT NULL DEFAULT 0,
+  period_type TEXT,                     -- term-span workspace details: which grading period this column belongs to (schema v9)
+  label TEXT NOT NULL DEFAULT '',       -- session title / manual short-code override ('' = automatic code) (schema v9)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT

@@ -4,6 +4,8 @@ import ConfirmDialog from './ConfirmDialog';
 import MoveColumnDialog from './MoveColumnDialog';
 import { formatNumber, toCents, centsToNumber } from '@/lib/gradeCalculator';
 import { toDateInputValue, formatDateMMDDYYYY, formatDateLong } from '@/lib/dateUtils';
+import { columnCodeInfo } from '@/lib/shortCodes';
+import { isWorkspace, aggMethodLabel } from '@/lib/workspace';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -56,6 +58,8 @@ function AssessmentBlock({
   columnNotes,        // { [columnId]: body } — alive column notes (v1.8.0)
   onEditColumnNote,   // (columnId) => void — opens the note editor
   onDeleteColumnNote, // (columnId) => void — deletes with undo + toast
+  onOpenWorkspace,    // (assessmentId) => void — navigates to the workspace (v1.9.0)
+  codesOn,            // whether the short-code header row is shown (rowSpan math)
 }) {
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(assessment.name);
@@ -65,9 +69,11 @@ function AssessmentBlock({
   const [weight, setWeight] = useState(assessment.weight_percent);
   const [confirmDeleteColumn, setConfirmDeleteColumn] = useState(null);
   const [editingDate, setEditingDate] = useState(null);
+  const [editingCode, setEditingCode] = useState(null);
   const [movingColumn, setMovingColumn] = useState(null);
-  // Set when Escape cancels a date edit, so the blur commit is skipped.
+  // Set when Escape cancels a date/code edit, so the blur commit is skipped.
   const dateCancelRef = useRef(false);
+  const codeCancelRef = useRef(false);
 
   // Keep local edit buffers in sync when the assessment changes externally
   // (e.g. after an undo/redo refresh). Render-time adjustment per React docs.
@@ -82,7 +88,10 @@ function AssessmentBlock({
     setWeight(assessment.weight_percent);
   }
 
-  const colSpan = Math.max(assessment.columns.length, 1);
+  // Workspace assessments occupy exactly ONE grid column (the computed one),
+  // however many detail columns live behind their workspace.
+  const workspace = isWorkspace(assessment);
+  const colSpan = workspace ? 1 : Math.max(assessment.columns.length, 1);
 
   // Refresh periods AND scores when an operation may touch score data.
   const refreshAll = () => (onRefreshData ? onRefreshData() : onRefresh());
@@ -377,8 +386,11 @@ function AssessmentBlock({
 
   // Right-click menu for the assessment header — replaces the old +/trash icons.
   const assessmentMenuItems = () => [
-    !assessment.is_exam && { label: 'Add date column', onClick: addColumn },
-    !assessment.is_exam && { label: 'Rename assessment…', onClick: () => setEditingName(true) },
+    // Workspace assessments manage their details in the workspace, never
+    // through grid columns.
+    workspace && { label: 'Open workspace…', onClick: () => onOpenWorkspace?.(assessment.id) },
+    !assessment.is_exam && !workspace && { label: 'Add date column', onClick: addColumn },
+    !assessment.is_exam && { label: 'Rename assessment…', separatorBefore: workspace, onClick: () => setEditingName(true) },
     { label: 'Edit weight…', onClick: () => setEditingWeight(true) },
     { label: 'Delete assessment…', danger: true, separatorBefore: true, onClick: () => setConfirmDelete(true) },
   ];
@@ -390,7 +402,9 @@ function AssessmentBlock({
         periodId={periodId}
         colSpan={colSpan}
         // The Exam is permanently the last assessment — it cannot be dragged.
-        dragDisabled={!!assessment.is_exam || editingName || editingWeight || confirmDelete}
+        // Projected term-span copies belong to ANOTHER period's ordering and
+        // cannot be dragged either (their placement is by projection rule).
+        dragDisabled={!!assessment.is_exam || !!assessment.projected || editingName || editingWeight || confirmDelete}
         onContextMenu={e => onOpenMenu?.(e, assessmentMenuItems())}
         className={`${colors.light} border-r border-b border-gray-200 text-center px-2 py-1.5`}
       >
@@ -535,6 +549,32 @@ function AssessmentBlock({
   ];
 
   if (mode === 'header-dates') {
+    // Workspace assessments: ONE quiet cell spanning the dates/codes/max
+    // rows — the doorway to the workspace, plus the configuration at a
+    // glance. Live completion counts stay in the stats footer and the
+    // workspace itself (a static header keeps the memoization contract).
+    if (workspace) {
+      const cfg = assessment.span === 'term'
+        ? 'whole term'
+        : `${aggMethodLabel(assessment.agg_method).toLowerCase()}${assessment.agg_max ? ` · /${formatNumber(assessment.agg_max)}` : ''}`;
+      return (
+        <th
+          data-col-head={`ws-${assessment.id}`}
+          rowSpan={codesOn ? 3 : 2}
+          className="relative border-r border-gray-200 px-1 py-0.5 text-center align-middle"
+          onContextMenu={e => onOpenMenu?.(e, assessmentMenuItems())}
+        >
+          <button
+            onClick={() => onOpenWorkspace?.(assessment.id)}
+            className="block w-full text-[9px] text-blue-600 hover:text-blue-800 hover:underline py-0.5 truncate"
+            title={`Open the ${assessment.name} workspace — ${cfg}`}
+          >
+            workspace ↗
+          </button>
+          <span className="block text-[8.5px] text-gray-400 truncate" title={cfg}>{cfg}</span>
+        </th>
+      );
+    }
     if (assessment.columns.length === 0) {
       return (
         <th
@@ -639,7 +679,98 @@ function AssessmentBlock({
     );
   }
 
+  // Commit a short-code edit (v1.9.0). The label field stores MANUAL names
+  // only: typing the automatic code back (or clearing) saves '' — the column
+  // returns to automatic sequencing; anything else is preserved forever.
+  const commitCodeLabel = async (col, autoCode, inputValue) => {
+    setEditingCode(null);
+    if (codeCancelRef.current) {
+      codeCancelRef.current = false;
+      return;
+    }
+    const prev = String(col.label || '').trim();
+    let next = String(inputValue || '').trim();
+    if (next === autoCode) next = ''; // the automatic value is never frozen
+    if (next === prev) return;
+    const apply = (v) => onPatchColumn(col.id, { label: v });
+    apply(next); // instant UI
+    try {
+      await putColumn(col.id, { label: next });
+    } catch {
+      apply(prev);
+      onSaveError?.('Could not save the column name — value restored.');
+      return;
+    }
+    onHistoryPush?.({
+      label: 'rename column',
+      undo: async () => { apply(prev); await putColumn(col.id, { label: prev }); },
+      redo: async () => { apply(next); await putColumn(col.id, { label: next }); },
+    });
+  };
+
+  // Short-code row (v1.9.0, redesigned): EXACTLY the dates row's presentation
+  // and editing pattern — same th classes, same span typography, same
+  // click-to-edit → blur-commit → Escape-cancel lifecycle. The tooltip shows
+  // the actual assessment name ("Quiz 3"), never the word "automatic".
+  if (mode === 'header-codes') {
+    if (workspace) return null; // covered by the dates-row cell's rowSpan
+    if (assessment.columns.length === 0) {
+      return (
+        <th className="relative border-r border-gray-200 px-1 py-0.5 text-center">
+          <span className="block text-[9px] text-gray-300 py-0.5">--</span>
+        </th>
+      );
+    }
+    const info = columnCodeInfo(assessment);
+    return (
+      <>
+        {assessment.columns.map((col, i) => (
+          <th
+            key={col.id}
+            data-col-head={col.id}
+            className="relative border-r border-gray-200 px-1 py-0.5 text-center"
+            // This instance's menu offers only actions that WORK from this
+            // row; structural operations live on the dates/max rows.
+            onContextMenu={e => onOpenMenu?.(e, [
+              { label: 'Rename column…', onClick: () => setEditingCode(col.id) },
+              { label: 'Focus assessment…', onClick: () => onFocusColumn?.(col.id) },
+            ])}
+          >
+            <span
+              className="block text-[9px] cursor-pointer hover:text-blue-600 py-0.5 truncate"
+              onClick={() => setEditingCode(col.id)}
+              title={info[i].manual ? `${info[i].code} — ${info[i].long}` : info[i].long}
+            >
+              {info[i].code}
+            </span>
+            {editingCode === col.id && (
+              <input
+                type="text"
+                autoFocus
+                maxLength={24}
+                className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-20 text-[10px] border border-blue-400 bg-white text-center focus:outline-none focus:ring-1 focus:ring-blue-400 py-0.5"
+                style={{ width: '64px' }}
+                defaultValue={info[i].code}
+                onFocus={e => e.target.select()}
+                onBlur={e => commitCodeLabel(col, info[i].auto, e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') e.target.blur();
+                  else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    codeCancelRef.current = true;
+                    e.target.blur();
+                  }
+                }}
+              />
+            )}
+          </th>
+        ))}
+      </>
+    );
+  }
+
   if (mode === 'header-max-scores') {
+    if (workspace) return null; // covered by the dates-row cell's rowSpan
     if (assessment.columns.length === 0) {
       return (
         <th className="border-r border-gray-200 px-1 py-0.5 text-center">

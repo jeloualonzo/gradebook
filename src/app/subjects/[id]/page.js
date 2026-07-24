@@ -24,6 +24,7 @@ import NoteEditorDialog from '@/components/NoteEditorDialog';
 import { HighlightContext, loadHighlightConfig, saveHighlightConfig } from '@/lib/highlightsClient';
 import { displayName } from '@/lib/names';
 import { formatDateMMDDYYYY } from '@/lib/dateUtils';
+import { projectPeriods, isWorkspace } from '@/lib/workspace';
 
 export default function GradebookPage() {
   const { id } = useParams();
@@ -76,21 +77,28 @@ export default function GradebookPage() {
     return window.localStorage.getItem('gb-stats-footer') === '1';
   });
 
+  // The gradebook VIEW: term-span workspace assessments projected into every
+  // period band, workspace details scoped per band (pure transform — raw
+  // periods stay the truth for structural operations).
+  const viewPeriods = useMemo(() => projectPeriods(periods), [periods]);
+
   const applyView = useCallback((mode, threshold, sort) => {
     setViewMode(mode); setViewThreshold(threshold); setViewSort(sort);
     if (mode === 'all' && sort === 'az') { setViewIds(null); return; }
-    const grades = computeAllGrades({ subject, periods, scores }, students);
+    const grades = computeAllGrades({ subject, periods: viewPeriods, scores }, students);
     const finalById = Object.fromEntries(students.map(s => [s.id, grades[s.id]?.FINAL_GRADE ?? null]));
     let list = students;
     if (mode === 'below') list = belowThreshold(students, finalById, threshold);
     if (mode === 'missing') {
-      const cols = periods.flatMap(p => p.assessments.flatMap(a => a.columns.map(c => ({ columnId: String(c.id) }))));
+      // Workspace details never count as missing (Expected/N-A is not
+      // missing work — the workspace summary owns completion).
+      const cols = viewPeriods.flatMap(p => p.assessments.filter(a => !isWorkspace(a)).flatMap(a => a.columns.map(c => ({ columnId: String(c.id) }))));
       const mc = missingCounts(cols, students.map(s => String(s.id)), scores);
       list = students.filter(s => (mc.get(String(s.id)) || 0) > 0);
     }
     if (sort !== 'az') list = rankOrder(list, finalById, sort);
     setViewIds(list.map(s => s.id));
-  }, [subject, periods, scores, students]);
+  }, [subject, viewPeriods, scores, students]);
 
   const viewStudents = useMemo(() => {
     if (!viewIds) return students;
@@ -410,6 +418,12 @@ export default function GradebookPage() {
     return (p?.assessments || []).map(a => a.id);
   }, []);
 
+  // Workspace navigation (v1.9.0): the computed column, its header, and the
+  // assessment menu all lead to the dedicated workspace page.
+  const openWorkspace = useCallback((assessmentId) => {
+    router.push(`/subjects/${id}/workspace/${assessmentId}`);
+  }, [router, id]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -574,7 +588,7 @@ export default function GradebookPage() {
       <div className="flex-1 overflow-auto p-4">
         <GradebookTable
           subject={subject}
-          periods={periods}
+          periods={viewPeriods}
           students={viewStudents}
           scores={scores}
           showStats={showStats}
@@ -588,6 +602,7 @@ export default function GradebookPage() {
           onDeleteCellNote={handleDeleteCellNote}
           onEditColumnNote={openColumnNoteEditor}
           onDeleteColumnNote={handleDeleteColumnNote}
+          onOpenWorkspace={openWorkspace}
           rosterNumbers={rosterNumbers}
           onFocusColumn={setFocusColumn}
           onNotify={showToast}
@@ -698,7 +713,7 @@ export default function GradebookPage() {
         <StudentFocusPanel
           student={focusStudent}
           subject={subject}
-          periods={periods}
+          periods={viewPeriods}
           scores={scores}
           rosterNo={rosterNumbers.get(String(focusStudent.id))}
           onClose={() => setFocusStudent(null)}

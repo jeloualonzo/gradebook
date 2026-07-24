@@ -10,6 +10,7 @@
 import { computePeriodGrade, computeFinalSubjectGrade, toCents } from './gradeCalculator.js';
 import { activeColumnIds } from './classStats.js';
 import { formatDateMMDDYYYY } from './dateUtils.js';
+import { isWorkspace, workspaceAggregate, workspaceStatus } from './workspace.js';
 
 const hasValue = (v) => v !== undefined && v !== null && v !== '';
 
@@ -25,8 +26,11 @@ export function attendanceLetter(value, config) {
 
 export function buildStudentFocus({ student, subject, periods, scores }) {
   const sid = student.id;
+  // Workspace details never join the active-column missing rule: an
+  // Expected/N-A workspace cell is not "missing work" (pass PROJECTED
+  // periods — src/lib/workspace.js — so term-span grades land correctly).
   const allCols = periods.flatMap(p =>
-    p.assessments.flatMap(a => a.columns.map(c => ({ columnId: String(c.id) })))
+    p.assessments.filter(a => !isWorkspace(a)).flatMap(a => a.columns.map(c => ({ columnId: String(c.id) })))
   );
   const active = activeColumnIds(allCols, scores);
 
@@ -40,6 +44,23 @@ export function buildStudentFocus({ student, subject, periods, scores }) {
       type: period.type,
       grade,
       assessments: period.assessments.map(a => {
+        if (isWorkspace(a)) {
+          // One computed line instead of per-column entries.
+          const agg = workspaceAggregate(a, scores, sid);
+          const status = workspaceStatus(a, scores, sid, period.type);
+          return {
+            id: a.id,
+            name: a.name,
+            weight: parseFloat(a.weight_percent) || 0,
+            entries: [],
+            entered: status === 'completed' ? 1 : 0,
+            workspace: {
+              status,
+              earned: agg ? agg.earned : null,
+              max: agg ? agg.max : null,
+            },
+          };
+        }
         const entries = a.columns.map(col => {
           const raw = scores?.[col.id]?.[sid];
           const entered = hasValue(raw);
